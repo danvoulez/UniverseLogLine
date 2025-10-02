@@ -174,6 +174,9 @@ struct TimelineSpanRow {
     verification_status: String,
     delta_s: Option<f64>,
     replay_count: Option<i32>,
+    // This field is mapped from the database for compatibility/future use,
+    // but is currently unused in code. It is retained to avoid breaking
+    // database row mapping and to support potential future features.
     #[allow(dead_code)]
     #[sqlx(rename = "replay_from")]
     _replay_from: Option<Uuid>,
