@@ -4,7 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use crate::motor::types::{Span, SpanStatus};
 use crate::infra::id::logline_id::LogLineIDWithKeys;
-use crate::timeline::{TimelineQuery, TimelineEntry, TimelineStats};
+use crate::timeline::{TimelineEntry, TimelineQuery, TimelineStats};
+use logline_core::config::CoreConfig;
+use logline_core::db::DatabasePool;
+use logline_core::errors::LogLineError;
 
 #[derive(Debug, Clone)]
 pub struct TimelinePostgres {
@@ -15,11 +18,21 @@ impl TimelinePostgres {
     /// Cria nova instância da Timeline PostgreSQL
     pub async fn new(database_url: &str) -> Result<Self, sqlx::Error> {
         let pool = PgPool::connect(database_url).await?;
-        
-        // Executar migrations automaticamente
+
         sqlx::migrate!("./timeline/migrations").run(&pool).await?;
-        
+
         Ok(TimelinePostgres { pool })
+    }
+
+    pub async fn new_with_core_config(config: &CoreConfig) -> Result<Self, LogLineError> {
+        let shared_pool = DatabasePool::connect(config).await?;
+        Self::from_shared_pool(&shared_pool).await
+    }
+
+    pub async fn from_shared_pool(pool: &DatabasePool) -> Result<Self, LogLineError> {
+        let pg_pool = pool.inner().clone();
+        sqlx::migrate!("./timeline/migrations").run(&pg_pool).await?;
+        Ok(TimelinePostgres { pool: pg_pool })
     }
     
     /// Converte Span para inserção no PostgreSQL

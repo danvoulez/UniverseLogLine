@@ -7,6 +7,9 @@ description = "Sistema de registro distribuído para instituições computaciona
 license = "MIT"
 repository = "https://github.com/logline/logline"
 
+[workspace]
+members = ["logline-core", "logline-protocol", "logline-id"]
+
 [dependencies]
 # Principais dependências
 serde = { version = "1.0", features = ["derive"] }
@@ -48,6 +51,9 @@ regex = "1.10"
 dirs = "5.0"
 base64 = "0.21"
 hex = "0.4"
+dotenvy = "0.15"
+logline-core = { path = "logline-core" }
+logline-protocol = { path = "logline-protocol" }
 
 [dev-dependencies]
 mockall = "0.12"
