@@ -1,17 +1,19 @@
 use clap::{Parser, Subcommand};
 use std::fs;
-use std::env;
+
+use logline_core::config::CoreConfig;
+use logline_core::identity::{LogLineID, LogLineIDWithKeys};
+use logline_core::logging;
 
 // Use the crate modules instead of declaring them locally
-use logline::motor;
-use logline::infra;
-use logline::timeline;
-use logline::federation;
 use logline::enforcement;
+use logline::federation;
+use logline::infra;
+use logline::motor;
+use logline::timeline;
 
 use motor::Engine;
-use infra::id::logline_id::{LogLineID, LogLineKeyPair as LogLineIDWithKeys};
-use timeline::{Timeline, TimelineQuery, TimelinePostgres, ReplayEngine, HashBundleExporter};
+use timeline::{HashBundleExporter, ReplayEngine, Timeline, TimelinePostgres, TimelineQuery};
 
 #[derive(Parser)]
 #[command(name = "logline")]
@@ -105,11 +107,22 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    // Carregar variáveis de ambiente do .env
-    dotenvy::dotenv().ok();
-    
+    if let Err(err) = logging::init_tracing(None) {
+        eprintln!("⚠️ Falha ao inicializar tracing: {}", err);
+    }
+
+    let core_config = match CoreConfig::from_env() {
+        Ok(config) => config,
+        Err(err) => {
+            eprintln!("❌ Erro de configuração: {}", err);
+            std::process::exit(1);
+        }
+    };
+
+    tracing::info!(node = %core_config.node_name, "Configuração carregada");
+
     let cli = Cli::parse();
-    
+
     match cli.command {
         Commands::Init { node_name } => {
             let id_with_keys = LogLineID::generate(&node_name);
@@ -453,29 +466,26 @@ async fn main() {
                 };
                 
                 if postgres {
-                    // Usar PostgreSQL para replay
-                    if let Ok(database_url) = std::env::var("LOGLINE_DATABASE_URL") {
-                        match TimelinePostgres::new(&database_url).await {
-                            Ok(timeline_pg) => {
-                                match replay_engine.replay_span_from_postgres(uuid, &timeline_pg, &current_id).await {
-                                    Ok(new_span_id) => {
-                                        println!("✅ Replay PostgreSQL concluído!");
-                                        println!("🆔 Novo span: {}", new_span_id);
-                                    },
-                                    Err(e) => {
-                                        eprintln!("❌ Erro no replay PostgreSQL: {}", e);
-                                        std::process::exit(1);
-                                    }
+                    match TimelinePostgres::new_with_core_config(&core_config).await {
+                        Ok(timeline_pg) => {
+                            match replay_engine
+                                .replay_span_from_postgres(uuid, &timeline_pg, &current_id)
+                                .await
+                            {
+                                Ok(new_span_id) => {
+                                    println!("✅ Replay PostgreSQL concluído!");
+                                    println!("🆔 Novo span: {}", new_span_id);
                                 }
-                            },
-                            Err(e) => {
-                                eprintln!("❌ Erro ao conectar PostgreSQL: {}", e);
-                                std::process::exit(1);
+                                Err(e) => {
+                                    eprintln!("❌ Erro no replay PostgreSQL: {}", e);
+                                    std::process::exit(1);
+                                }
                             }
                         }
-                    } else {
-                        eprintln!("❌ LOGLINE_DATABASE_URL não configurada para PostgreSQL");
-                        std::process::exit(1);
+                        Err(e) => {
+                            eprintln!("❌ Erro ao conectar PostgreSQL: {}", e);
+                            std::process::exit(1);
+                        }
                     }
                 } else {
                     // Usar NDJSON para replay
@@ -507,31 +517,31 @@ async fn main() {
         Commands::HashBundle { output, postgres } => {
             if let Some(current_id) = get_current_identity() {
                 if postgres {
-                    // Exportar PostgreSQL como HashBundle
-                    if let Ok(database_url) = std::env::var("LOGLINE_DATABASE_URL") {
-                        match TimelinePostgres::new(&database_url).await {
-                            Ok(timeline_pg) => {
-                                match HashBundleExporter::export_postgres_hashbundle(&timeline_pg, &output, &current_id).await {
-                                    Ok(files) => {
-                                        println!("✅ HashBundle PostgreSQL gerado:");
-                                        for file in files {
-                                            println!("   📄 {}", file);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        eprintln!("❌ Erro ao gerar HashBundle PostgreSQL: {}", e);
-                                        std::process::exit(1);
+                    match TimelinePostgres::new_with_core_config(&core_config).await {
+                        Ok(timeline_pg) => {
+                            match HashBundleExporter::export_postgres_hashbundle(
+                                &timeline_pg,
+                                &output,
+                                &current_id,
+                            )
+                            .await
+                            {
+                                Ok(files) => {
+                                    println!("✅ HashBundle PostgreSQL gerado:");
+                                    for file in files {
+                                        println!("   📄 {}", file);
                                     }
                                 }
-                            },
-                            Err(e) => {
-                                eprintln!("❌ Erro ao conectar PostgreSQL: {}", e);
-                                std::process::exit(1);
+                                Err(e) => {
+                                    eprintln!("❌ Erro ao gerar HashBundle PostgreSQL: {}", e);
+                                    std::process::exit(1);
+                                }
                             }
                         }
-                    } else {
-                        eprintln!("❌ LOGLINE_DATABASE_URL não configurada para PostgreSQL");
-                        std::process::exit(1);
+                        Err(e) => {
+                            eprintln!("❌ Erro ao conectar PostgreSQL: {}", e);
+                            std::process::exit(1);
+                        }
                     }
                 } else {
                     // Exportar NDJSON como HashBundle
