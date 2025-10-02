@@ -375,23 +375,23 @@ Using "Mermaid Renderer"
    \- Configure database connections  
    \- Test deployment and API functionality
 
-\#\#\#\# Task 4: Extract logline-timeline service  
-1\. \*\*Day 1-2: Code Migration\*\*  
-   \- Create new repository \`logline-timeline\`  
-   \- Move timeline code from existing codebase  
-   \- Update dependencies to use logline-core  
-   \- Ensure all tests pass
+\#\#\#\# ✅ Task 4: Extract logline-timeline service
+1\. \*\*Day 1-2: Code Migration\*\*
+   \- ✅ Create new repository \`logline-timeline\`
+   \- ✅ Move timeline code from existing codebase into dedicated repository module
+   \- ✅ Update dependencies to use logline-core / logline-protocol
+   \- ✅ Ensure the new crate passes \`cargo check\`
 
-2\. \*\*Day 3-4: API Implementation\*\*  
-   \- Implement REST API endpoints (timeline operations)  
-   \- Add WebSocket server for real-time updates  
-   \- Enhance tenant isolation mechanisms
+2\. \*\*Day 3-4: API Implementation\*\*
+   \- ✅ Implement REST API endpoints (timeline operations)
+   \- ✅ Add WebSocket server for real-time updates
+   \- ⏳ Enhance tenant isolation mechanisms
 
-3\. \*\*Day 5: Deployment Configuration\*\*  
-   \- Create Dockerfile  
-   \- Set up Railway service  
-   \- Configure database connections  
-   \- Test deployment and API functionality
+3\. \*\*Day 5: Deployment Configuration\*\*
+   \- ⏳ Create Dockerfile
+   \- ⏳ Set up Railway service
+   \- ⏳ Configure database connections
+   \- ⏳ Test deployment and API functionality
 
 \#\#\#\# Task 13: Set up CI/CD pipelines  
 1\. \*\*Day 1-2: GitHub Actions\*\*  
