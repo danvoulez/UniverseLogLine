@@ -52,7 +52,7 @@ impl TimelineRepository {
         .bind(span.id)
         .bind(span.timestamp)
         .bind(&span.logline_id)
-        .bind(&span.logline_id)
+        .bind(&span.author)
         .bind(&span.title)
         .bind(
             span.data
