@@ -1,6 +1,7 @@
 mod repository;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
@@ -17,11 +18,12 @@ use logline_core::logging;
 use logline_protocol::timeline::{
     Span, SpanStatus, SpanType, TimelineEntry, TimelineQuery, Visibility,
 };
+use logline_rules::{Decision, RuleEngine, RuleError};
 use repository::TimelineRepository;
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 #[tokio::main]
@@ -38,11 +40,13 @@ async fn main() -> Result<(), ServerError> {
         .parse()?;
 
     let repository = TimelineRepository::from_config(&config).await?;
+    let rule_engine = load_rule_engine_from_env()?;
     let (tx, _rx) = broadcast::channel(128);
 
     let state = AppState {
         repository,
         broadcaster: tx,
+        rules: rule_engine,
     };
 
     let app = Router::new()
@@ -66,6 +70,39 @@ fn load_timeline_config() -> Result<CoreConfig, LogLineError> {
         .map_err(Into::into)
 }
 
+fn load_rule_engine_from_env() -> Result<Option<Arc<RuleEngine>>, RuleError> {
+    match std::env::var("TIMELINE_RULES_PATH") {
+        Ok(path) => {
+            let trimmed = path.trim();
+            if trimmed.is_empty() {
+                warn!("TIMELINE_RULES_PATH configured but empty; skipping rule engine");
+                return Ok(None);
+            }
+
+            let engine = RuleEngine::from_path(trimmed)?;
+            info!(
+                rule_count = engine.rules().len(),
+                %trimmed,
+                "loaded timeline rule definitions"
+            );
+            Ok(Some(Arc::new(engine)))
+        }
+        Err(std::env::VarError::NotPresent) => {
+            debug!(
+                "no TIMELINE_RULES_PATH configured; timeline will accept spans without rule enforcement"
+            );
+            Ok(None)
+        }
+        Err(err) => {
+            warn!(
+                ?err,
+                "failed to read TIMELINE_RULES_PATH, skipping rule loading"
+            );
+            Ok(None)
+        }
+    }
+}
+
 async fn health_check() -> &'static str {
     "ok"
 }
@@ -74,11 +111,16 @@ async fn health_check() -> &'static str {
 struct AppState {
     repository: TimelineRepository,
     broadcaster: broadcast::Sender<TimelineEntry>,
+    rules: Option<Arc<RuleEngine>>,
 }
 
 impl AppState {
     fn subscribe(&self) -> broadcast::Receiver<TimelineEntry> {
         self.broadcaster.subscribe()
+    }
+
+    fn rule_engine(&self) -> Option<&RuleEngine> {
+        self.rules.as_deref()
     }
 }
 
@@ -88,7 +130,43 @@ async fn create_span(
     State(state): State<AppState>,
     Json(payload): Json<CreateSpanRequest>,
 ) -> AppResult<Json<TimelineEntry>> {
-    let span = payload.into_span();
+    let mut span = payload.into_span();
+
+    if let Some(engine) = state.rule_engine() {
+        let outcome = engine.apply(&mut span);
+
+        if !outcome.applied_rules.is_empty() {
+            info!(
+                rules = ?outcome.applied_rules,
+                decision = ?outcome.decision,
+                "rules applied to incoming span"
+            );
+        }
+
+        match &outcome.decision {
+            Decision::Allow => {}
+            Decision::Reject { reason } => {
+                return Err(AppError::bad_request(reason.clone()));
+            }
+            Decision::Simulate { note } => {
+                span.status = SpanStatus::Simulated;
+                if let Some(note) = note {
+                    span.add_metadata("simulation_note", serde_json::Value::String(note.clone()));
+                }
+            }
+        }
+
+        if !outcome.applied_rules.is_empty() || !outcome.notes.is_empty() {
+            span.add_metadata(
+                "rule_engine",
+                serde_json::json!({
+                    "rules": outcome.applied_rules,
+                    "notes": outcome.notes,
+                }),
+            );
+        }
+    }
+
     let entry = state.repository.create_span(span).await?;
 
     if let Err(err) = state.broadcaster.send(entry.clone()) {
@@ -252,6 +330,8 @@ enum ServerError {
     Addr(#[from] std::net::AddrParseError),
     #[error("configuration error: {0}")]
     Config(#[from] LogLineError),
+    #[error("failed to load rule engine: {0}")]
+    Rules(#[from] RuleError),
     #[error("http server error: {0}")]
     Server(#[from] HyperError),
 }
