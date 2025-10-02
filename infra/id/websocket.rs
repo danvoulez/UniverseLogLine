@@ -132,7 +132,6 @@ impl IDWebSocketHandler {
             uuid: id.uuid.to_string(),
         }
     }
-
     fn serialize_response(&self, response: IDResponse) -> String {
         match serde_json::to_string(&response) {
             Ok(json) => json,
