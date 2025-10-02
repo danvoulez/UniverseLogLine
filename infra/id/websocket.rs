@@ -129,7 +129,7 @@ impl IDWebSocketHandler {
         IDResponse::Identity {
             id: id.to_string(),
             node_name: id.node_name.clone(),
-            uuid: id.id.to_string(),
+            uuid: id.uuid.to_string(),
         }
     }
 
