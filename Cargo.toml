@@ -8,7 +8,7 @@ license = "MIT"
 repository = "https://github.com/logline/logline"
 
 [workspace]
-members = ["logline-core", "logline-protocol", "logline-id", "logline-timeline"]
+members = ["logline-core", "logline-protocol", "logline-id", "logline-timeline", "logline-rules"]
 [dependencies]
 # Principais dependências
 serde = { version = "1.0", features = ["derive"] }

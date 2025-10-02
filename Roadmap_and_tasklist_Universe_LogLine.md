@@ -62,12 +62,12 @@ With identity and protocol in place:
 
 The rules system would be separate but closely integrated with the protocol:
 
-\- Grammar parsing and validation  
-\- Rule execution environment  
-\- Context management  
-\- Rule storage and versioning  
-\- Rule chaining and dependencies  
-\- Multi-tenant rule isolation
+- [x] Grammar parsing and validation (YAML/JSON loader with structural checks)
+- [x] Rule execution environment
+- [ ] Context management
+- [ ] Rule storage and versioning
+- [ ] Rule chaining and dependencies
+- [ ] Multi-tenant rule isolation
 
 \#\#\# 6\. Create Core Engine (\`logline-engine\`)
 
