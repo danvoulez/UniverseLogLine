@@ -1,0 +1,15 @@
+module tenant_manager
+version: "1.0.0"
+use core_schema as core
+
+flow create_tenant
+  inputs: display_name, primary_color
+  outputs: core.Tenant
+  steps:
+    - create core.Tenant { tenant_id: slug(display_name), display_name, primary_color, created_at: now() }
+    - emit span "tenant.created" attrs { tenant_id: self.tenant_id }
+
+rule only_active_tenants
+  condition: (Tenant.active == true)
+  consequence: allow
+  else: raise_error("tenant_disabled")

@@ -1,0 +1,28 @@
+contract ws_authenticator version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.auth"; description: "Autenticação/Autorização por LogLine ID / JWT / HMAC."; }
+
+  on call with { headers, ip, tenant_id, mode }:
+    let mode_eff = mode ?? "logline_id";
+    match mode_eff {
+      "logline_id" => {
+        let token = headers["authorization"] ?? "";
+        assert starts_with(token, "LLID "), "Token LogLine ID ausente";
+        let llid = strip_prefix(token, "LLID ");
+        assert verify_logline_id(llid), "LogLine ID inválido";
+        return { ready: true, logline_id: llid, roles: roles_of(llid), tenant_id: tenant_id ?? tenant_of(llid) };
+      },
+      "jwt" => {
+        let bearer = headers["authorization"] ?? "";
+        assert starts_with(bearer, "Bearer "), "JWT ausente";
+        let jwt = strip_prefix(bearer, "Bearer ");
+        let claims = verify_jwt(jwt);
+        return { ready: true, logline_id: claims.sub, roles: claims.roles ?? [], tenant_id: claims.tenant_id ?? tenant_id };
+      },
+      "hmac" => {
+        let sig = headers["x-websocket-signature"] ?? "";
+        assert verify_hmac(sig, headers["x-websocket-timestamp"] ?? "", headers["x-websocket-nonce"] ?? ""), "HMAC inválido";
+        return { ready: true, logline_id: "hmac:"+ip, roles: ["device"], tenant_id: tenant_id ?? "public" };
+      },
+      _ => fail "Modo de auth inválido"
+    }
+}

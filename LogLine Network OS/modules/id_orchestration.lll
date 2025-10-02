@@ -1,0 +1,35 @@
+module id_orchestration
+version: "1.2.0"
+use core_schema as core
+
+entity LogLineID
+  key: id (uuid)
+  properties:
+    - id: uuid
+    - tenant_id: string
+    - passkey: pubkey
+    - ssh_key: string?
+    - device_type: core.DeviceType
+    - agent_signature: string?
+    - trust_level: float (0.0..1.0) = 0.5
+    - ghost_mode: bool = false
+    - node_tags: list[string] = []
+    - created_at: core.datetime
+
+rule unique_id_per_tenant: enforce uniqueness on LogLineID.id within tenant_id
+
+flow identity_bootstrap
+  inputs: tenant_id, device_info
+  outputs: LogLineID
+  steps:
+    - generate_passkey -> pkey
+    - create LogLineID { id: uuid(), tenant_id, passkey: pkey, device_type: device_info.type, ssh_key: device_info.ssh_key, node_tags: device_info.tags, created_at: now() }
+    - emit span "identity.created" attrs { tenant_id, logline_id: self.id, device: device_info.type }
+
+policy trust_growth
+  when count(validations for self.id) >= 3
+  action set trust_level = min(1.0, trust_level + 0.2)
+
+policy ghost_redact
+  when ghost_mode == true
+  action redact fields [ssh_key, agent_signature]

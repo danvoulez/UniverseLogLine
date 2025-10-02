@@ -1,0 +1,17 @@
+# Template computável para onboarding RFID
+
+rfid_onboarding {
+  internal_id: "logline-id://{{handle}}"
+  rfid_serial: "{{rfid_serial}}"
+  activated_at: {{timestamp}}
+  status: "ativo"
+  span: {
+    type: "rfid_onboarding"
+    span_id: "{{uuid}}"
+    provenance: "onboarding"
+    agent: "logline-id://{{handle}}"
+    timestamp: {{timestamp}}
+    method: "rfid"
+    rfid_serial: "{{rfid_serial}}"
+  }
+}

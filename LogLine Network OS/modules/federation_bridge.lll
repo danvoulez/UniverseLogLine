@@ -1,0 +1,43 @@
+module federation_bridge
+version: "1.0.0"
+
+use core_schema as core
+use id_orchestration as idm
+use timeline_logger as tl
+use zero_knowledge_auth as zk
+use quantum_resistant as pqc
+
+enum ConsensusProto [raft, pbft, tendermint]
+
+entity FederatedNetwork
+  key: network_id (uuid)
+  properties:
+    - tenant_id: string
+    - network_id: uuid
+    - root_authority: idm.LogLineID
+    - member_nodes: list[idm.LogLineID]
+    - cross_chain_enabled: bool = false
+    - consensus_protocol: ConsensusProto = pbft
+    - created_at: core.datetime
+
+flow federate_networks
+  inputs: tenant_id, local_net (FederatedNetwork), remote_net (FederatedNetwork)
+  outputs: federation_contract
+  steps:
+    - zk.mutual_challenge(local_net.root_authority, remote_net.root_authority) -> ok
+    - require ok
+    - pqc.key_agreement([local_net.root_authority, remote_net.root_authority])
+    - establish_secure_channel(local_net, remote_net)
+    - sync_identity_roots(local_net, remote_net)
+    - let contract = create federation_contract { id: uuid(), local: local_net.network_id, remote: remote_net.network_id, ts: now() }
+    - tl.log_event(tenant_id, "federation.established", contract)
+    - return contract
+
+flow create_cross_network_spans
+  inputs: tenant_id, federation_contract, span_payload
+  outputs: { local_span: core.Span, remote_span: core.Span }
+  steps:
+    - let local_span = tl.log_event(tenant_id, "xspan.local", span_payload)
+    - send over secure_channel federation_contract to remote "xspan.remote" with span_payload
+    - let remote_span = await ack "xspan.remote.ack" within "2s"
+    - return { local_span, remote_span }

@@ -1,0 +1,36 @@
+module realtime_sync
+version: "1.0.0"
+
+use core_schema as core
+use timeline_logger as tl
+
+enum RTProto [websocket, grpc_stream, sse]
+
+entity SyncStream
+  key: stream_id (uuid)
+  properties:
+    - tenant_id: string
+    - stream_id: uuid
+    - publisher: string
+    - subscribers: list[string]
+    - protocol: RTProto
+    - buffer_size: int = 256
+    - latency_target_ms: float = 50.0
+    - started_at: core.datetime
+
+flow establish_realtime_channel
+  inputs: tenant_id, publisher, subscribers (list[string]), protocol (RTProto)
+  outputs: SyncStream
+  steps:
+    - negotiate_protocol(publisher, subscribers, protocol) -> ok
+    - require ok
+    - let s = create SyncStream { tenant_id, stream_id: uuid(), publisher, subscribers, protocol, started_at: now() }
+    - tl.log_event(tenant_id, "realtime.channel.started", s)
+    - return s
+
+flow monitor_latency
+  inputs: tenant_id, stream_id
+  steps:
+    - let p95 = rtt_p95(stream_id)
+    - if p95 > (select SyncStream where stream_id).latency_target_ms:
+        scale_out_buffers(stream_id)

@@ -1,0 +1,14 @@
+contract "manifesto_logline" {
+  workflow: "boot"
+  flow: "fundacao"
+  created_by: "logline-id://macmini-loja"
+  version: 1.0
+  timestamp: "2025-09-27T14:03:00Z"
+  
+  // Princípios fundamentais do LogLine
+  "Toda ação será registrada"
+  "Toda decisão será auditável" 
+  "O esforço humano terá valor computável"
+  "Cada span deixará rastro reversível"
+  "A memória institucional será viva e reexecutável"
+}

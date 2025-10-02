@@ -1,0 +1,36 @@
+module storage_binder
+version: "1.2.0"
+use core_schema as core
+
+entity StorageVolume
+  key: mount_id (uuid)
+  properties:
+    - tenant_id: string
+    - node_id: string
+    - mount_id: uuid
+    - mount_path: string
+    - storage_gb: float
+    - used_gb: float
+    - fs_type: core.FS
+    - cipher: core.Cipher = chacha20_poly1305
+    - replica_of: uuid?
+    - snapshot_policy: { interval: core.duration, keep_last: int } = { "interval": "10m", "keep_last": 12 }
+
+flow bind_volume
+  inputs: tenant_id, node_id, mount_request
+  outputs: StorageVolume
+  steps:
+    - check_mount_path(mount_request.path) -> ok
+    - require ok else raise "invalid_path"
+    - create StorageVolume { tenant_id, node_id, mount_id: uuid(), mount_path: mount_request.path, storage_gb: mount_request.size_gb, used_gb: 0, fs_type: mount_request.fs, cipher: mount_request.cipher }
+    - emit span "volume.bound" attrs { tenant_id, node_id, mount_path: mount_request.path }
+
+flow snapshot_volume
+  inputs: tenant_id, mount_id
+  outputs: snapshot_cid
+  steps:
+    - let v = select StorageVolume where mount_id=mount_id and tenant_id=tenant_id
+    - run snapshot(v.mount_path, v.cipher) -> cid
+    - prune snapshots keep_last = v.snapshot_policy.keep_last
+    - emit span "volume.snapshot" attrs { tenant_id, mount_id, cid }
+    - return cid

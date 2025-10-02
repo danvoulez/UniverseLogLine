@@ -1,0 +1,15 @@
+# Relatórios computáveis de onboarding
+
+reporting {
+  periodicity: "7d"
+  metrics: [
+    "identidades criadas",
+    "ghost expirados",
+    "biometrias validadas",
+    "RFID ativados",
+    "contratos assinados",
+    "identidades revogadas"
+  ]
+  export_formats: ["json", "csv", "pdf"]
+  notification_channels: ["email", "webhook", "dashboard"]
+}

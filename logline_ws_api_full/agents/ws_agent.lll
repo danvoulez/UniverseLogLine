@@ -1,0 +1,34 @@
+contract ws_agent version "1.0.0" {
+  meta: {
+    id: "vv.api.ws_webhook.agent";
+    description: "Agente computável principal da API. Supervisiona lifecycle, saúde, e delega ao orchestrator.";
+    build_date: "2025-09-08";
+  }
+
+  requires: [
+    "orchestrator.lll",
+    "logline/ws_metrics.lll"
+  ]
+
+  state machine Health {
+    Idle -> Online on start;
+    Online -> Degraded on event("orchestrator_error");
+    Degraded -> Online on event("recover_ok");
+  }
+
+  on start:
+    spawn "orchestrator.lll";
+    emit_span "agent_online" { ts: now() };
+    transition Health to Online;
+
+  // Health ping (could be invoked via cron or external)
+  on call with { op }:
+    match op {
+      "ping" => return { ok: true, ts: now(), state: current_state(Health) };
+      _ => return { ok: false, msg: "unknown_op" }
+    }
+
+  on event "orchestrator_error" as e:
+    call "logline/ws_metrics.lll" with { kind: "orchestrator_error", detail: e };
+    transition Health to Degraded;
+}

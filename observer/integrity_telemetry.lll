@@ -1,0 +1,11 @@
+(docstring observer.integrity_telemetry "Snapshot de integridade → firehose.")
+(contract observer.integrity_telemetry.lll
+  import interfaces.web.integrity.lll as iweb
+  import engine.observer.firehose.lll as fh
+  import sys.time as t
+  entry emit_snapshot->map {
+    s=iweb.get()
+    evt={ ts:t.now_iso(), src:"integrity", level:(s["ok"]?"info":"error"), kind:"integrity.snapshot", root:s["root"], count:s["count"], last_index:s["last_index"], ok:s["ok"] }
+    CALL fh.ingest(evt); return evt
+  }
+)

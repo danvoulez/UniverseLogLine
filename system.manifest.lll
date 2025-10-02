@@ -1,0 +1,305 @@
+# LogLine System Manifest v1.0.0
+# Constituição Computável do LogLineOS
+# 
+# Este documento define os limites, poderes e responsabilidades
+# do próprio sistema LogLine como instituição computável.
+# 
+# ⚖️ Natureza: Direito Público Computável
+# 🔒 Status: Imutável (salvo processo de emenda constitucional)
+# 📜 Vigência: Perpétua com versionamento
+# 🔐 Hash: será calculado após assinatura final
+
+system_manifest {
+  name: "LogLineOS Constitutional Manifest",
+  version: "1.0.0",
+  hash: "sha256:pending_final_signature",
+  created: "2025-09-28T00:00:00Z",
+  effective_date: "2025-09-28T00:00:00Z", 
+  immutable: true,
+  
+  # ===== FUNDAMENTOS CONSTITUCIONAIS =====
+  
+  constitutional_principles: {
+    sovereignty: "Cada projeto possui soberania gramatical local",
+    universality: "grammar_core.lll é base imutável para interoperabilidade",
+    auditability: "Toda execução deve ser rastreável e reexecutável",
+    temporality: "Tempo é declarativo e adaptável por gramática local",
+    enforcement: "Regras emergem da gramática, não de código hardcoded",
+    federalism: "Sistema central serve, não governa os projetos locais"
+  },
+
+  # ===== PODERES E LIMITAÇÕES DO SISTEMA =====
+  
+  system_powers: {
+    # O que o LogLineOS PODE fazer
+    authorized_operations: [
+      "load_and_validate_grammar_core",
+      "load_and_validate_local_grammars", 
+      "execute_spans_within_active_grammar",
+      "emit_verification_spans",
+      "manage_temporal_clocks_per_project",
+      "enforce_signature_verification",
+      "maintain_provenance_chains",
+      "execute_rollback_operations",
+      "synchronize_between_federated_nodes",
+      "emit_system_health_spans"
+    ],
+    
+    # O que o LogLineOS NÃO PODE fazer
+    prohibited_operations: [
+      "modify_grammar_core_structure",
+      "execute_without_valid_grammar",
+      "forge_or_backdate_timestamps", 
+      "bypass_signature_verification",
+      "alter_immutable_spans",
+      "operate_without_provenance",
+      "ignore_local_enforcement_rules",
+      "centralize_project_decisions"
+    ]
+  },
+
+  # ===== DIREITOS E DEVERES DOS PROJETOS =====
+  
+  project_rights: {
+    grammatical_sovereignty: "Projetos podem definir gramática própria desde que herde grammar_core.lll",
+    temporal_autonomy: "Projetos definem seu próprio modelo de tempo computável", 
+    enforcement_autonomy: "Projetos definem suas próprias regras de enforcement",
+    privacy_control: "Projetos controlam quais spans são locais, federados ou públicos",
+    migration_freedom: "Projetos podem migrar entre versões de gramática"
+  },
+  
+  project_duties: {
+    grammar_inheritance: "Deve herdar e respeitar grammar_core.lll", 
+    signature_requirement: "Deve assinar todos os spans emitidos",
+    provenance_maintenance: "Deve manter cadeia de proveniência válida",
+    resource_responsibility: "Deve usar recursos de forma responsável",
+    interoperability: "Deve manter capacidade de interoperação básica"
+  },
+
+  # ===== GOVERNANÇA DO SISTEMA =====
+  
+  governance: {
+    authority_hierarchy: [
+      {
+        level: 1,
+        name: "Constitutional Authority",
+        description: "grammar_core.lll e system.manifest.lll",
+        mutability: false,
+        amendment_process: "Requer consenso de nós fundadores + processo formal"
+      },
+      {
+        level: 2, 
+        name: "System Runtime Authority",
+        description: "LogLineOS runtime, enforcement engine, temporal system",
+        mutability: true,
+        update_process: "Via commits assinados no repositório oficial"
+      },
+      {
+        level: 3,
+        name: "Local Project Authority", 
+        description: "Gramáticas locais, enforcement local, clocks locais",
+        mutability: true,
+        update_process: "Autonomia total dos projetos"
+      }
+    ],
+    
+    founder_nodes: [
+      "logline-id://macmini-loja-fundador",
+      "logline-id://macmini-dan-fundador"
+    ],
+    
+    constitutional_amendments: {
+      proposal_threshold: "Requer proposta de nó fundador",
+      approval_threshold: "Requer aprovação de 100% dos nós fundadores",
+      implementation_delay: "30 dias após aprovação",
+      rollback_provision: "Pode ser revertida em 90 dias se houver problemas críticos"
+    }
+  },
+
+  # ===== ENFORCEMENT COMPUTÁVEL =====
+  
+  enforcement_rules: {
+    grammar_validation: {
+      rule: "Toda execução deve validar contra gramática ativa",
+      enforcement_level: "critical",
+      violation_response: "reject_and_log"
+    },
+    
+    signature_verification: {
+      rule: "Todo span deve ter assinatura válida",
+      enforcement_level: "critical", 
+      violation_response: "reject_and_log"
+    },
+    
+    provenance_chain: {
+      rule: "Todo span deve ter proveniência rastreável",
+      enforcement_level: "critical",
+      violation_response: "reject_and_log"
+    },
+    
+    temporal_integrity: {
+      rule: "Timestamps não podem ser retroativos nem futuros além de margem aceitável",
+      enforcement_level: "warning",
+      violation_response: "alert_and_continue",
+      margin_seconds: 300
+    },
+    
+    resource_limits: {
+      rule: "Execuções não podem exceder limites de recursos por projeto",
+      enforcement_level: "warning",
+      violation_response: "throttle_and_log",
+      max_memory_mb: 1024,
+      max_cpu_percent: 80,
+      max_execution_time_seconds: 3600
+    }
+  },
+
+  # ===== FEDERAÇÃO E REDE =====
+  
+  federation_rules: {
+    node_requirements: {
+      must_have_logline_id: true,
+      must_validate_signatures: true,
+      must_respect_local_grammar: true,
+      must_maintain_provenance: true
+    },
+    
+    sync_requirements: {
+      public_spans: "Deve sincronizar com rede federada",
+      federated_spans: "Deve sincronizar apenas com nós autorizados",
+      local_spans: "Não deve sincronizar (apenas local)",
+      conflict_resolution: "Prioridade por timestamp + hash de desempate"
+    },
+    
+    trust_model: {
+      founder_nodes: "Confiança absoluta",
+      validated_nodes: "Confiança baseada em histórico",
+      new_nodes: "Confiança limitada até validação",
+      compromised_nodes: "Isolamento automático"
+    }
+  },
+
+  # ===== AUDITORIA E TRANSPARÊNCIA =====
+  
+  audit_requirements: {
+    span_retention: {
+      verification_spans: "Permanente",
+      execution_spans: "5 anos mínimo", 
+      temporal_spans: "1 ano mínimo",
+      debug_spans: "90 dias mínimo"
+    },
+    
+    public_disclosure: {
+      system_health: "Público",
+      constitutional_changes: "Público",
+      security_incidents: "Público após resolução",
+      project_stats: "Agregado público, detalhes privados"
+    },
+    
+    audit_trail: {
+      all_system_operations: "Devem gerar spans auditáveis",
+      constitutional_violations: "Devem ser reportadas publicamente",
+      performance_metrics: "Devem ser coletadas continuamente",
+      security_events: "Devem ser logados com alta prioridade"
+    }
+  },
+
+  # ===== EMERGÊNCIA E RECUPERAÇÃO =====
+  
+  emergency_procedures: {
+    system_compromise: {
+      detection: "Via spans anômalos ou alertas de segurança",
+      response: "Isolamento automático + alerta aos nós fundadores",
+      recovery: "Rollback para último estado válido conhecido",
+      notification: "Broadcast para toda a rede federada"
+    },
+    
+    constitutional_crisis: {
+      detection: "Conflito irreconciliável entre regras",
+      response: "Modo de segurança (só operações essenciais)",
+      resolution: "Processo de emenda constitucional emergencial",
+      timeframe: "48 horas para resolução ou rollback"
+    },
+    
+    network_partition: {
+      detection: "Perda de comunicação com >50% dos nós",
+      response: "Modo local até reconexão",
+      reconciliation: "Merge automático baseado em timestamps",
+      conflict_resolution: "Prioridade para nós fundadores"
+    }
+  },
+
+  # ===== MÉTRICAS E SAÚDE DO SISTEMA =====
+  
+  health_metrics: {
+    required_metrics: [
+      "grammar_validation_success_rate",
+      "span_emission_rate", 
+      "signature_verification_rate",
+      "temporal_accuracy",
+      "resource_utilization",
+      "network_sync_health",
+      "enforcement_effectiveness"
+    ],
+    
+    performance_thresholds: {
+      grammar_validation_success_rate: ">99%",
+      span_emission_latency: "<100ms",
+      signature_verification_time: "<10ms", 
+      temporal_drift: "<1s",
+      memory_usage: "<80%",
+      cpu_usage: "<70%"
+    },
+    
+    alerting: {
+      critical_threshold_breach: "Immediate alert to founders",
+      warning_threshold_breach: "Log and monitor",
+      trend_degradation: "Weekly report",
+      improvement_opportunities: "Monthly analysis"
+    }
+  },
+
+  # ===== CONFORMIDADE E LEGALIDADE =====
+  
+  legal_compliance: {
+    data_protection: {
+      personal_data_handling: "Conforme gramática local + LGPD",
+      data_retention: "Conforme políticas declaradas pelos projetos",
+      right_to_erasure: "Suportado via spans de revogação",
+      data_portability: "Via export de spans auditáveis"
+    },
+    
+    intellectual_property: {
+      code_licensing: "MIT License para sistema core",
+      grammar_licensing: "Definido pelos projetos",
+      span_ownership: "Pertence ao emissor com proveniência",
+      derivative_works: "Permitidas desde que mantenham compatibilidade"
+    },
+    
+    regulatory_compliance: {
+      financial_operations: "Deve seguir regulamentações locais",
+      healthcare_data: "Deve seguir HIPAA/equivalentes",
+      educational_records: "Deve seguir FERPA/equivalentes",
+      general_compliance: "Responsabilidade dos projetos individuais"
+    }
+  },
+
+  # ===== ASSINATURA E VALIDAÇÃO =====
+  
+  manifest_validation: {
+    signed_by: "pending_founder_signatures",
+    signature_algorithm: "ed25519",
+    hash_algorithm: "sha256",
+    verification_nodes: [
+      "logline-id://macmini-loja-fundador",
+      "logline-id://macmini-dan-fundador"
+    ],
+    
+    effective_conditions: [
+      "All founder nodes must sign",
+      "Hash verification must pass",
+      "Grammar core compatibility must be verified",
+      "No constitutional conflicts detected"
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+# Template de onboarding computável para biometria facial
+
+biometria_facial {
+  internal_id: "logline-id://{{handle}}"
+  embedding: "{{embedding}}"
+  score: {{score}}
+  validated_at: {{timestamp}}
+  status: "{{if score > 0.8}}validado{{else}}rejeitado{{endif}}"
+  span: {
+    type: "biometria_validada"
+    span_id: "{{uuid}}"
+    provenance: "onboarding"
+    agent: "logline-id://{{handle}}"
+    timestamp: {{timestamp}}
+    method: "facial"
+    score: {{score}}
+  }
+}

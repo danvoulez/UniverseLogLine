@@ -1,0 +1,31 @@
+contract ws_retry_queue version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.retry_queue"; description: "Fila de retries para webhooks/eventos; backoff incremental." }
+
+  state Queue { size: 0 }
+
+  on call with { action, payload }:
+    match action {
+      "push" => push(payload),
+      "drain" => drain(),
+      _ => return { ok: false, msg: "unknown_action" }
+    }
+
+  fn push(p):
+    set Queue.size = Queue.size + 1;
+    store append "vv.ws.queue" p;
+    emit_span "retry_enqueued" { size: Queue.size, ts: now() };
+    return { ok: true, size: Queue.size };
+
+  fn drain():
+    let items = store read_all "vv.ws.queue";
+    for it in items {
+      let resp = call "contracts/webhook_dispatcher.lll" as "dispatch" with { event: it.event, target: it.target };
+      if resp.ok == true {
+        store remove_one "vv.ws.queue" it;
+        set Queue.size = Queue.size - 1;
+      } else {
+        // mantém para próximo ciclo
+      }
+    }
+    return { ok: true, remaining: Queue.size }
+}

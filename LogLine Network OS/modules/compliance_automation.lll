@@ -1,0 +1,16 @@
+module compliance_automation
+version: "1.0.0"
+
+use posture_checks_ext as posture
+use policy_primitives as pol
+
+flow auto_comply
+  inputs: tenant_id, node_id, geo_hint
+  steps:
+    - let region = pol.geo_detect(geo_hint)
+    - match region:
+        "EU": pol.apply_gdpr(tenant_id, node_id)
+        "CA": pol.apply_pipeda(tenant_id, node_id)
+        "US-CA": pol.apply_ccpa(tenant_id, node_id)
+        _: pol.apply_baseline(tenant_id, node_id)
+    - posture.verify_compliance(tenant_id, node_id, region)

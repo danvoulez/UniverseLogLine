@@ -1,0 +1,19 @@
+(docstring observer.health "Saúde por taxa de erros + lat média.")
+(contract observer.health.lll
+  import engine.observer.aggregator.lll as agg
+  import bus.core as bus
+  import sys.time as t
+  state { last_status:string="UNKNOWN"; last_reason:string=""; last_ts:string="" }
+  def _pct(a,b)->f64 { return b==0 ? 0.0 : 100.0*a/b }
+  entry evaluate->map {
+    ev=agg.latest(300); total=len(ev)
+    if total==0 { last_status="WARN"; last_reason="Sem eventos"; last_ts=t.now_iso(); bus.publish("observer.health",{status:last_status,reason:last_reason}); return {status:last_status,reason:last_reason,ts:last_ts} }
+    errors=0; lat_total=0.0; lat_samples=0
+    for e in ev { if e.get("level","info") in ["error","fatal","crit"] { errors=errors+1 } if e.contains("latency_ms") { lat_total=lat_total+to_f64(e["latency_ms"]); lat_samples=lat_samples+1 } }
+    err=_pct(errors,total); avg=lat_samples==0?0.0:lat_total/lat_samples
+    status="OK"; if err>5.0 or avg>300.0 { status="WARN" } if err>15.0 or avg>800.0 { status="CRIT" }
+    last_status=status; last_reason="err="+err.to_string()+"% avg="+avg.to_string()+"ms"; last_ts=t.now_iso()
+    bus.publish("observer.health",{status:status,reason:last_reason,ts:last_ts}); return {status:status,reason:last_reason,ts:last_ts}
+  }
+  view status->map { return {status:last_status,reason:last_reason,ts:last_ts} }
+)

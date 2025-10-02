@@ -1,0 +1,11 @@
+contract test_webhook_security version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.tests.webhook_security"; description: "Teste básico de assinatura HMAC de webhooks." }
+
+  on test:
+    let cfg = call "logline/ws_config.lll" with { scope: "ws_api" };
+    let dummy_event = { event: "feedback", video_id: "VID1", value: "like", ts: now() };
+    let r = call "contracts/webhook_dispatcher.lll" as "dispatch" with { event: dummy_event, target: "https://example.invalid/webhook" };
+    // Esperado: vai falhar (domínio inválido), mas deve enfileirar retry
+    assert r.ok == false, "Dispatcher deveria falhar com destino inválido";
+    return { ok: true };
+}

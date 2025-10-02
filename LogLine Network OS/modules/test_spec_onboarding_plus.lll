@@ -1,0 +1,22 @@
+module test_spec_onboarding_plus
+version: "1.0.0"
+
+use onboarding_api as api
+use zero_touch_discovery as ztd
+use progressive_onboarding as prog
+use onboarding_telemetry as ot
+use core_schema as core
+
+test "mdns + http quickstart + progress + funnel"
+  arrange:
+    - let tenant = "voulezvous"
+    - let tok = api.issue_token_http(tenant).token
+    - ztd.broadcast_discovery(tenant, tok)
+  act:
+    - let node = ztd.scan_and_join().node_id
+    - let step = prog.progressive_enhance(tenant, node)
+    - let funnel = ot.track_funnel(tenant).funnel
+  assert:
+    - expect node != ""
+    - expect step.score >= 0.3
+    - expect funnel.discovered >= 1

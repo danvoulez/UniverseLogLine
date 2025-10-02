@@ -1,0 +1,17 @@
+# Transição computável via biometria
+
+biometric_transition {
+  handle: "{{handle}}"
+  internal_id: "logline-id://{{handle}}"
+  previous_status: "ghost"
+  new_status: "validado"
+  transition_at: {{timestamp}}
+  condition: "biometria_validada"
+  span: {
+    type: "identity_transitioned"
+    span_id: "{{uuid}}"
+    provenance: "transition"
+    agent: "logline-id://{{handle}}"
+    timestamp: {{timestamp}}
+  }
+}

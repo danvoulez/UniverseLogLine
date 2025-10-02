@@ -1,0 +1,250 @@
+/// # Grammar Core - Constituição Computável Universal
+///
+/// Esta é a gramática fundamental do ecossistema LogLine.
+/// É IMUTÁVEL e serve como base para todas as gramáticas locais.
+/// 
+/// Contém:
+/// - Tipos primitivos universais
+/// - Estruturas mínimas para interoperabilidade
+/// - Garantias de enforcement comum
+/// - Proveniência computável básica
+///
+/// Nenhum sistema pode operar fora desta gramática.
+/// Ela é a "Constituição" do ecossistema computável LogLine.
+
+grammar_core {
+    name: "grammar_core",
+    version: "1.0.0",
+    hash: "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    immutable: true,
+    created_at: "2025-09-27T00:00:00Z",
+    authority: "logline_foundation",
+    
+    /// Tipos primitivos universais
+    primitive_types: {
+        string: {
+            description: "Texto UTF-8",
+            max_length: 65535,
+            validation: "valid_utf8"
+        },
+        
+        number: {
+            description: "Número decimal de precisão dupla",
+            range: [-1.7976931348623157e+308, 1.7976931348623157e+308],
+            validation: "finite_number"
+        },
+        
+        integer: {
+            description: "Número inteiro de 64 bits",
+            range: [-9223372036854775808, 9223372036854775807],
+            validation: "valid_integer"
+        },
+        
+        boolean: {
+            description: "Valor verdadeiro ou falso",
+            values: [true, false],
+            validation: "boolean_only"
+        },
+        
+        timestamp: {
+            description: "Timestamp UTC em microsegundos",
+            base_unit: "microseconds",
+            format: "unix_timestamp_micros",
+            validation: "positive_timestamp"
+        },
+        
+        logline_id: {
+            description: "Identificador único LogLine",
+            format: "base58_encoded",
+            length: 44,
+            validation: "valid_logline_id"
+        },
+        
+        hash_sha256: {
+            description: "Hash SHA-256",
+            format: "hexadecimal",
+            length: 64,
+            validation: "valid_sha256"
+        }
+    },
+    
+    /// Estruturas mínimas universais para interoperabilidade
+    universal_structures: {
+        /// Todo sistema deve poder produzir contratos
+        contract: {
+            description: "Contrato computável básico",
+            required_fields: {
+                id: "logline_id",
+                created_at: "timestamp", 
+                created_by: "logline_id",
+                contract_hash: "hash_sha256",
+                grammar_version: "string"
+            },
+            optional_fields: {
+                parent_id: "logline_id",
+                expires_at: "timestamp",
+                metadata: "object"
+            },
+            immutable_fields: ["id", "created_at", "created_by", "contract_hash"],
+            validation_rules: [
+                "id != null",
+                "created_at > 0", 
+                "created_by != null",
+                "contract_hash.length == 64"
+            ]
+        },
+        
+        /// Todo sistema deve poder produzir spans auditáveis
+        span: {
+            description: "Registro de auditoria computável",
+            required_fields: {
+                span_id: "logline_id",
+                timestamp: "timestamp",
+                actor: "logline_id", 
+                action: "string",
+                target: "string"
+            },
+            optional_fields: {
+                parent_span: "logline_id",
+                result: "string",
+                metadata: "object",
+                error: "string"
+            },
+            immutable_fields: ["span_id", "timestamp", "actor"],
+            validation_rules: [
+                "span_id != null",
+                "timestamp > 0",
+                "actor != null",
+                "action.length > 0"
+            ]
+        },
+        
+        /// Todo sistema deve rastrear proveniência
+        provenance: {
+            description: "Rastreamento de origem e transformações",
+            required_fields: {
+                provenance_id: "logline_id",
+                source_id: "logline_id",
+                transformation: "string",
+                timestamp: "timestamp"
+            },
+            optional_fields: {
+                transformation_metadata: "object",
+                verification_hash: "hash_sha256"
+            },
+            immutable_fields: ["provenance_id", "source_id", "timestamp"],
+            validation_rules: [
+                "provenance_id != null",
+                "source_id != null", 
+                "transformation.length > 0"
+            ]
+        }
+    },
+    
+    /// Enforcement universal mínimo - aplicado a TODOS os sistemas
+    universal_enforcement: {
+        rules: [
+            {
+                rule_id: "immutable_id",
+                expression: "id field is immutable after creation",
+                scope: "universal",
+                priority: 1000,
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "valid_timestamps", 
+                expression: "all timestamps must be positive and not future",
+                scope: "universal",
+                priority: 999,
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "valid_logline_ids",
+                expression: "all logline_id fields must be valid base58",
+                scope: "universal", 
+                priority: 998,
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "required_fields_present",
+                expression: "all required fields must be present and non-null",
+                scope: "universal",
+                priority: 997,
+                violation_action: "reject_transaction"
+            }
+        ],
+        
+        /// Triggers universais - aplicados automaticamente
+        universal_triggers: [
+            {
+                trigger_id: "auto_timestamp",
+                condition: "on_create",
+                action: "set created_at = current_timestamp",
+                automatic: true
+            },
+            {
+                trigger_id: "auto_hash",
+                condition: "on_create || on_update", 
+                action: "recalculate contract_hash",
+                automatic: true
+            }
+        ]
+    },
+    
+    /// Modelo de tempo universal básico
+    universal_time_model: {
+        name: "universal_microseconds",
+        base_unit: "microseconds",
+        epoch: "unix_epoch",
+        precision: "microsecond",
+        calculation_rules: [
+            {
+                name: "current_time",
+                formula: "unix_timestamp_micros()"
+            },
+            {
+                name: "age_calculation", 
+                formula: "current_time - created_at"
+            }
+        ]
+    },
+    
+    /// Interoperabilidade - como sistemas se comunicam
+    interoperability: {
+        /// Formato de troca de dados
+        exchange_format: "json_with_logline_extensions",
+        
+        /// Codificação obrigatória
+        encoding: "utf8",
+        
+        /// Assinatura computável obrigatória
+        signature_algorithm: "ed25519",
+        
+        /// Hash para integridade
+        integrity_hash: "sha256",
+        
+        /// Versionamento semântico
+        versioning_scheme: "semantic_versioning"
+    },
+    
+    /// Extensibilidade - como gramáticas locais podem estender
+    extension_rules: {
+        /// Toda gramática local deve declarar extends
+        must_extend: true,
+        
+        /// Não pode contradizer regras universais
+        no_contradiction: true,
+        
+        /// Pode adicionar campos e regras
+        can_add_fields: true,
+        can_add_rules: true,
+        can_add_workflows: true,
+        
+        /// Não pode remover ou modificar campos universais
+        cannot_modify_universal_fields: true,
+        cannot_remove_universal_rules: true,
+        
+        /// Deve manter compatibilidade com estruturas universais
+        must_support_universal_structures: true
+    }
+}

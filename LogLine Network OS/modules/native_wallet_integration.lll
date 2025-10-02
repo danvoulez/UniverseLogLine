@@ -1,0 +1,48 @@
+module native_wallet_integration
+version: "1.0.1"
+
+use id_orchestration as idm
+use onboarding_plugplay as ob
+use device_probe as probe
+
+entity WalletCredential
+  key: credential_id (string)
+  properties:
+    - credential_id: string
+    - logline_id: idm.LogLineID
+    - platform: enum [apple_wallet, google_wallet]
+    - pass_type: enum [generic, membership, coupon]
+    - barcode: string
+    - metadata: json
+
+flow generate_apple_pass
+  inputs: tenant_id, node_id, display_name
+  outputs: { pass_url: string }
+  steps:
+    - let pass = wallet.create_pass({
+        format_version: 1,
+        team_id: "LOGLINE_TEAM",
+        pass_type: "pass.com.logline.node",
+        organization: "LogLine Network",
+        description: "Node Access Card",
+        logo_text: display_name,
+        barcode: { format: "PKBarcodeFormatQR", message: "logline://" + tenant_id + "/" + node_id, altText: node_id },
+        background_color: "#000", foreground_color: "#FFF", label_color: "#FF6B35"
+      })
+    - let url = wallet.host_pass(pass)
+    - create WalletCredential {
+        credential_id: uuid(), logline_id: { id: node_id }, platform: apple_wallet,
+        pass_type: membership, barcode: "logline://" + tenant_id + "/" + node_id,
+        metadata: { display_name }
+      }
+    - return { pass_url: url }
+
+flow nfc_provision
+  inputs: nfc_payload
+  outputs: { node_id: string }
+  steps:
+    - let data = nfc.decode_ndef(nfc_payload)
+    - require data.type == "logline/provision"
+    - let hw = probe.collect_hardware()
+    - let res = ob.quickstart_node_mac(data.tenant_id, data.token, { hint: "nfc" })
+    - return { node_id: res.node_id }

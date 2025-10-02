@@ -1,0 +1,22 @@
+# LogLineID Contrato Mínimo - Template
+
+contract {
+  contract_id: "{{uuid}}"
+  identity_id: "logline-id://danvoulez"
+  signed_by: "logline-id://danvoulez"
+  created_at: {{timestamp}}
+  terms: [
+    "Reconheço e aceito a criação da identidade computável LogLine ID.",
+    "Permito o uso dos dados de onboarding para fins de autenticação e validação.",
+    "Autorizo o registro de spans computáveis ligados à minha identidade."
+  ]
+  spans: [
+    span {
+      type: "contract_signed"
+      span_id: "{{uuid_span}}"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+      signature: "{{digital_signature}}"
+    }
+  ]
+}

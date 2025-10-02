@@ -1,0 +1,18 @@
+contract test_ws_message_dispatch version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.tests.dispatch"; description: "Teste de roteamento de mensagens WS." }
+
+  on test:
+    let ctx = { logline_id: "LLID test", roles: ["tester"], tenant_id: "voulezvous" };
+    // ping
+    let r1 = call "contracts/handle_incoming_event.lll" with { ctx: ctx, data: { type: "ping" } };
+    assert r1.status == "ok", "ping falhou";
+    // feedback ok
+    let r2 = call "contracts/handle_incoming_event.lll" with { ctx: ctx, data: { type: "feedback", video_id: "VID1", value: "like" } };
+    assert r2.status == "ok", "feedback falhou";
+    // desconhecido
+    let r3 = call "contracts/handle_incoming_event.lll" with { ctx: ctx, data: { type: "xyz" } };
+    assert r3.status == "noop", "fallback deveria ser noop";
+
+    emit_span "test_dispatch_ok" { ts: now() };
+    return { ok: true };
+}

@@ -1,0 +1,25 @@
+contract webhook_dispatcher version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.webhook_dispatcher"; description: "Envia payloads computáveis a endpoints externos com HMAC e retries."; }
+
+  on call as dispatch with { event, target, headers }:
+    let cfg = call "logline/ws_config.lll" with { scope: "ws_api" };
+    let url = target ?? cfg.webhook.default_target;
+    assert url != "", "Nenhum target configurado";
+    let body = to_json(event);
+    let signed_headers = merge(headers ?? {}, sign_hmac_headers(cfg.webhook.hmac_secret, body));
+    let resp = http.post url with {
+      headers: merge({ "content-type": "application/json" }, signed_headers),
+      body: body,
+      connect_timeout_ms: cfg.webhook.connect_timeout_ms,
+      read_timeout_ms: cfg.webhook.read_timeout_ms
+    };
+    if resp.status >= 200 && resp.status < 300 {
+      emit_span "webhook_ok" { target: url, code: resp.status, ts: now() };
+      return { ok: true, code: resp.status };
+    } else {
+      emit_span "webhook_fail" { target: url, code: resp.status, ts: now() };
+      // Empilha para retry
+      call "runtime/ws_retry_queue.lll" with { action: "push", payload: { event: event, target: url } };
+      return { ok: false, code: resp.status };
+    }
+}

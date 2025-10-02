@@ -1,0 +1,59 @@
+contract orchestrator version "1.0.0" {
+  meta: {
+    id: "vv.api.ws_webhook.orchestrator";
+    tenant_scope: "multitenant";
+    primary_color: "#111111";
+    description: "Orquestra WebSocket + Webhook; autentica, roteia, audita e garante retries.";
+    build_date: "2025-09-08";
+  }
+
+  requires: [
+    "contracts/websocket_server.lll",
+    "contracts/handle_incoming_event.lll",
+    "contracts/contract_ws_guard.lll",
+    "contracts/webhook_dispatcher.lll",
+    "logline/ws_authenticator.lll",
+    "logline/ws_config.lll",
+    "logline/ws_metrics.lll",
+    "runtime/ws_retry_queue.lll",
+    "runtime/ws_event_loop.lll"
+  ]
+
+  state machine Lifecycle {
+    Init -> Running on start;
+    Running -> Degraded on event("error");
+    Degraded -> Running on event("recovered");
+  }
+
+  on start:
+    let cfg = call "logline/ws_config.lll" with { scope: "ws_api" };
+    ensure call "logline/ws_authenticator.lll" with { mode: cfg.auth.mode } returns { ready: true };
+    spawn "runtime/ws_event_loop.lll" with { heartbeat_secs: cfg.ws.heartbeat_secs };
+    spawn "contracts/websocket_server.lll" with { host: cfg.ws.host, port: cfg.ws.port, heartbeat_secs: cfg.ws.heartbeat_secs };
+    emit_span "api_started" { host: cfg.ws.host, port: cfg.ws.port, mode: cfg.auth.mode, ts: now() };
+    transition Lifecycle to Running;
+
+  on event "ws.message":
+    let ctx = call "logline/ws_authenticator.lll" with { headers: payload.headers, ip: payload.ip, tenant_id: payload.tenant_id };
+    guard "contracts/contract_ws_guard.lll" with { ctx: ctx, payload: payload };
+    route "contracts/handle_incoming_event.lll" with { ctx: ctx, data: payload.data } into result;
+    emit_receipt "ws.message.ok" { request_id: payload.id, status: result.status ?? "ok", ts: now(), llid: ctx.logline_id };
+    if result.reply != null {
+      // opcional: enviar resposta direta ao cliente (se suportado pela runtime)
+      // send payload.session_id result.reply
+      emit_span "ws_reply_scheduled" { session_id: payload.session_id, ts: now() };
+    }
+    if result.webhook != null {
+      call "contracts/webhook_dispatcher.lll" as "dispatch" with { event: result.webhook, target: null };
+    }
+    call "logline/ws_metrics.lll" with { kind: "ws_message", ok: true, size: sizeof(to_string(payload.data)) };
+
+  on event "ws.disconnect":
+    emit_span "ws_disconnect" { session_id: payload.session_id, reason: payload.reason, ts: now() };
+    call "logline/ws_metrics.lll" with { kind: "ws_disconnect" };
+
+  on error as err:
+    call "runtime/ws_retry_queue.lll" with { action: "push", payload: last_payload() };
+    emit_span "orchestrator_error" { error: err.message, code: err.code, ts: now() };
+    transition Lifecycle to Degraded;
+}

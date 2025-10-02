@@ -1,0 +1,35 @@
+module incident_response
+version: "1.2.0"
+use core_schema as core
+use processing_distributor as pd
+use resource_allocator as ra
+use timeline_logger as tl
+
+entity Incident
+  key: inc_id (uuid)
+  properties:
+    - tenant_id: string
+    - inc_id: uuid
+    - severity: core.RiskLevel
+    - contract_id: uuid?
+    - node_id: string?
+    - message: string
+    - created_at: core.datetime
+    - mitigated_at: core.datetime?
+
+flow open_incident
+  inputs: tenant_id, severity, message, contract_id?, node_id?
+  outputs: Incident
+  steps:
+    - create Incident { tenant_id, inc_id: uuid(), severity, contract_id, node_id, message, created_at: now() }
+    - tl.log_event(tenant_id, "incident.opened", self)
+
+flow mitigate_incident
+  inputs: tenant_id, inc_id, action
+  steps:
+    - update Incident set mitigated_at = now() where inc_id=inc_id and tenant_id=tenant_id
+    - if action == "preempt":
+        preempt_running_with_lower_priority()
+    - if action == "reroute":
+        reroute_pending_to_fastest_nodes()
+    - tl.log_event(tenant_id, "incident.mitigated", { inc_id, action })

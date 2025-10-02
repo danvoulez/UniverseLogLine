@@ -1,0 +1,17 @@
+{
+  "name": "Switch Circle",
+  "steps": [
+    {
+      "login": {
+        "method": "token",
+        "token": "llid_demo"
+      }
+    },
+    {
+      "switch_circle": "circle://default"
+    }
+  ],
+  "expected": {
+    "circle_id": "circle://default"
+  }
+}

@@ -1,0 +1,20 @@
+# Contrato computável mínimo para onboarding institucional
+
+contract {
+  contract_id: "{{uuid}}"
+  internal_id: "logline-id://{{handle}}"
+  signed_at: {{timestamp}}
+  status: "assinado"
+  terms: [
+    "Identidade institucional para fins de acesso e registro",
+    "Consentimento para processamento computável"
+  ]
+  span: {
+    type: "contract_signed"
+    span_id: "{{uuid}}"
+    provenance: "onboarding"
+    agent: "logline-id://{{handle}}"
+    timestamp: {{timestamp}}
+    contract_id: "{{uuid}}"
+  }
+}

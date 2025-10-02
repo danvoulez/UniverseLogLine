@@ -1,0 +1,18 @@
+# Transição computável de estados de identidade
+
+transition {
+  transitions: [
+    {from: "ghost", to: "validado", condition: "biometria_validada"},
+    {from: "validado", to: "institucional", condition: "contrato_assinado"}
+  ]
+  forbidden: [
+    {from: "institucional", to: "ghost"},
+    {from: "ghost", to: "institucional"}
+  ]
+  span_type: "identity_transitioned"
+  process: [
+    "Registrar span de transição na timeline",
+    "Atualizar status computável",
+    "Persistir assinatura contratual quando institucional"
+  ]
+}

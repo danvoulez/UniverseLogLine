@@ -1,0 +1,17 @@
+# Auditoria computável do onboarding
+
+audit {
+  required_spans: [
+    "identity_created",
+    "biometria_validada",
+    "rfid_onboarding",
+    "contract_signed"
+  ]
+  snapshot_frequency: "1d"
+  log_type: "timeline"
+  process: [
+    "Auditar spans quanto à origem, assinatura e proveniência",
+    "Persistir snapshots computáveis",
+    "Emitir alertas para inconsistências"
+  ]
+}

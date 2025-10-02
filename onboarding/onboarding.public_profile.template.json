@@ -1,0 +1,10 @@
+{
+  "handle": "@danvoulez",
+  "internal_id": "logline-id://danvoulez",
+  "status": "validado",
+  "origin": "humano",
+  "created_at": "{{timestamp}}",
+  "spans": 1,
+  "trust_score": 80.0,
+  "permissions": ["view timeline", "create spans", "assinar contratos"]
+}

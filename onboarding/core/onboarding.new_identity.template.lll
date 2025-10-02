@@ -1,0 +1,21 @@
+# Template computável para criação de nova identidade LogLineID
+
+identity {
+  handle: "{{handle}}"
+  internal_id: "logline-id://{{handle}}"
+  origin: "{{origin}}"
+  created_at: {{timestamp}}
+  status: "validado"
+  auth_methods: {{auth_methods}}
+  roles: {{roles}}
+  spans: [
+    span {
+      type: "identity_created"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://{{handle}}"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+    }
+  ]
+  permissions: ["view timeline", "create spans", "assinar contratos"]
+}

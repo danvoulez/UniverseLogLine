@@ -1,0 +1,12 @@
+contract ws_event_loop version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.event_loop"; description: "Loop de eventos/heartbeats/housekeeping." }
+
+  params: { heartbeat_secs: 30 }
+
+  on start:
+    schedule every params.heartbeat_secs seconds event "tick";
+
+  on event "tick":
+    // Housekeeping simples
+    emit_span "ws_heartbeat" { ts: now() };
+}

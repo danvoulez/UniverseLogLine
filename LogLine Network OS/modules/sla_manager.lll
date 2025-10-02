@@ -1,0 +1,19 @@
+module sla_manager
+version: "1.0.0"
+
+entity SLO
+  key: slo_id (uuid)
+  properties:
+    - tenant_id: string
+    - slo_id: uuid
+    - name: string
+    - target: float     # ex: 0.99
+    - window: duration  # ex: "30d"
+    - metric: string    # ex: "contract.success_rate"
+
+flow burn_rate
+  inputs: tenant_id, slo_id
+  outputs: float
+  steps:
+    - compute errors vs budget on window
+    - return burn_ratio

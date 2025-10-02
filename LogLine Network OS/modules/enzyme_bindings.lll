@@ -1,0 +1,21 @@
+module enzyme_bindings
+version: "1.0.0"
+
+# Bindings padrão
+init:
+  - enzyme_runtime.register_enzyme({
+      enzyme_id: "polymerase", version: "1.0.0",
+      triggers: ["contract.queued"], affinity: ["llm_folding"], params: { hedge_ms: 2500 }, enabled: true
+    })
+  - enzyme_runtime.register_enzyme({
+      enzyme_id: "chaperone", version: "1.0.0",
+      triggers: ["contract.queued"], affinity: ["*"], params: {}, enabled: true
+    })
+  - enzyme_runtime.register_enzyme({
+      enzyme_id: "catalase", version: "1.0.0",
+      triggers: ["incident.opened"], affinity: ["*"], params: {}, enabled: true
+    })
+  - enzyme_runtime.register_enzyme({
+      enzyme_id: "lorentz_bias", version: "1.0.0",
+      triggers: ["allocate.candidates"], affinity: ["*"], params: {}, enabled: true
+    })

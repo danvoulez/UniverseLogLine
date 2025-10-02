@@ -1,0 +1,16 @@
+(docstring observer.forecast "EMA de eventos/min (α=0.3).")
+(contract observer.forecast.lll
+  import engine.observer.aggregator.lll as agg
+  import sys.time as t
+  import bus.core as bus
+  state { ema:f64=0.0; alpha:f64=0.3; last_ts:string="" }
+  def _bucket(ts:string)->string { return ts[0:16] }
+  entry update->map {
+    ev=agg.latest(2000); buckets:map<string,u32>={}
+    for e in ev { k=_bucket(e.get("ts",t.now_iso())); buckets[k]=(buckets.get(k,0)+1) }
+    keys=sort(keys_of(buckets))
+    for k in keys { v=to_f64(buckets[k]); if ema==0.0 { ema=v } else { ema=alpha*v+(1.0-alpha)*ema } last_ts=k+":00Z" }
+    bus.publish("observer.forecast",{ema:ema,ts:last_ts}); return {ema:ema,ts:last_ts}
+  }
+  view forecast->f64 { return ema }
+)

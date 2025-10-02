@@ -1,0 +1,74 @@
+# onboarding.core.lll - Fluxo computável e institucional do onboarding LogLineID
+# Define pontos de entrada, templates, regras e integrações.
+
+onboarding_core {
+  entrypoints: [
+    "onboarding.new_identity.template.lll",
+    "onboarding.ghost.template.lll",
+    "onboarding.face.template.lll",
+    "onboarding.voice.template.lll",
+    "onboarding.fingerprint.template.lll",
+    "onboarding.rfid.template.lll",
+    "onboarding.minimal_contract.lll"
+  ]
+  ruleset: [
+    "../2-Ruleset/rules.auth.lll",
+    "../2-Ruleset/rules.biometria.lll",
+    "../2-Ruleset/rules.rfid.lll",
+    "../2-Ruleset/rules.fingerprint.lll",
+    "../2-Ruleset/rules.ghost.lll",
+    "../2-Ruleset/rules.transition.lll",
+    "../2-Ruleset/rules.trust.lll",
+    "../2-Ruleset/rules.public_access.lll",
+    "../2-Ruleset/rules.signing.lll",
+    "../2-Ruleset/rules.reputation.lll"
+  ]
+  api_endpoints: [
+    "../4-LogLine-ID-e-API/api.resolve_username.rs",
+    "../4-LogLine-ID-e-API/api.query.rs",
+    "../4-LogLine-ID-e-API/api.me.rs",
+    "../4-LogLine-ID-e-API/api.public_profile.rs",
+    "../4-LogLine-ID-e-API/api.spans.rs",
+    "../4-LogLine-ID-e-API/api.verify_signature.rs",
+    "../4-LogLine-ID-e-API/api.ghost.rs",
+    "../4-LogLine-ID-e-API/api.trust_score.rs",
+    "../4-LogLine-ID-e-API/api.wallet.rs"
+  ]
+  timeline_span_types: [
+    "identity_created",
+    "ghost_identity_created",
+    "biometria_validada",
+    "rfid_onboarding",
+    "fingerprint_onboarding",
+    "contract_signed",
+    "identity_transitioned"
+  ]
+  audit: {
+    required_spans: [
+      "identity_created",
+      "biometria_validada",
+      "rfid_onboarding",
+      "contract_signed"
+    ]
+    snapshot_frequency: "1d"
+    log_type: "timeline"
+    process: [
+      "Auditar spans quanto à origem, assinatura e proveniência",
+      "Persistir snapshots computáveis",
+      "Emitir alertas para inconsistências"
+    ]
+  }
+  reporting: {
+    periodicity: "7d"
+    metrics: [
+      "identidades criadas",
+      "ghost expirados",
+      "biometrias validadas",
+      "RFID ativados",
+      "contratos assinados",
+      "identidades revogadas"
+    ]
+    export_formats: ["json", "csv", "pdf"]
+    notification_channels: ["email", "webhook", "dashboard"]
+  }
+}

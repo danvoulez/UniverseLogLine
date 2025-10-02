@@ -1,0 +1,48 @@
+module smart_contracts
+version: "1.1.0"
+
+use core_schema as core
+use core_ext as ext
+use consensus_engine as ce
+use resource_allocator as ra
+use processing_distributor as pd
+use timeline_logger as tl
+
+entity ComputeContract
+  key: contract_id (uuid)
+  properties:
+    - tenant_id: string
+    - contract_id: uuid
+    - owner: string
+    - participants: list[string]
+    - terms: ext.wasm_binary
+    - state: json = {}
+    - gas_limit: int = 10_000_000
+    - created_at: core.datetime
+
+flow deploy_contract
+  inputs: tenant_id, owner, wasm (ext.wasm_binary), initial_state
+  outputs: ComputeContract
+  steps:
+    - validate_gas_costs(wasm, initial_state) -> ok
+    - require ok
+    - let cc = create ComputeContract { tenant_id, contract_id: uuid(), owner, terms: wasm, state: initial_state, created_at: now() }
+    - ce.byzantine_consensus(tenant_id, { op: "deploy", contract_id: cc.contract_id }, current_validator_set(tenant_id))
+    - tl.log_event(tenant_id, "contract.deployed", { contract_id: cc.contract_id })
+    - return cc
+
+flow invoke_contract
+  inputs: tenant_id, contract_id, method, args
+  outputs: json
+  steps:
+    - let cc = select ComputeContract where tenant_id=tenant_id and contract_id=contract_id
+    - let comp = { workflow: "wasm", requirements: { cpu_cores: 2, ram_gb: 1 }, inputs: [], labels:["wasm"] }
+    - let node = ra.pick_node_for_contract(tenant_id, { contract_id, workflow:"wasm", requirements: comp.requirements, created_at: now(), ttl:"2m", state: queued })
+    - pd.dispatch_task(tenant_id, { contract_id, workflow:"wasm", requirements: comp.requirements, created_at: now(), ttl:"2m", state: queued })
+    - let out = sandbox_execute(cc.terms, method, args, gas_limit=cc.gas_limit)
+    - tl.log_event(tenant_id, "contract.invoked", { contract_id, method })
+    - return out
+
+policy gas_meter
+  on smart_contracts.invoke_contract
+  action deny if estimated_gas(method,args) > (select ComputeContract where contract_id).gas_limit

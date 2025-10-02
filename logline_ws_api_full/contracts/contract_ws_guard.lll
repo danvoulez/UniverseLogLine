@@ -1,0 +1,14 @@
+contract contract_ws_guard version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.guard"; description: "Guardrails: origem, IP, tenant, tamanho e rate-limit." }
+
+  on guard with { ctx, payload }:
+    let cfg = call "logline/ws_config.lll" with { scope: "ws_api" };
+    if payload.origin != null {
+      assert payload.origin in cfg.ws.allowed_origins, "Origin não permitido";
+    }
+    assert sizeof(to_string(payload.data)) <= cfg.ws.max_message_bytes, "Mensagem acima do limite";
+    assert not blacklist_contains(payload.ip), "IP bloqueado";
+    throttle key: (ctx.logline_id), limit_per_minute: 600;
+    assert ctx.tenant_id != null, "Tenant indefinido";
+    return { ok: true };
+}

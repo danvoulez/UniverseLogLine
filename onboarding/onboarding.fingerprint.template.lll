@@ -1,0 +1,29 @@
+# LogLineID Onboarding Template - Cadastro de Digital
+
+identity {
+  handle: "@danvoulez"
+  internal_id: "logline-id://danvoulez"
+  origin: "humano"
+  created_at: {{timestamp}}
+  status: "validado"
+  auth_methods: ["fingerprint"]
+  fingerprint: {
+    hash: "{{fingerprint_hash}}"
+    last_verified: {{timestamp}}
+    score: "{{match_score}}"
+  }
+  spans: [
+    span {
+      type: "fingerprint_onboarding"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://danvoulez"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+      verification: {
+        method: "fingerprint"
+        score: "{{match_score}}"
+      }
+    }
+  ]
+  permissions: ["view timeline", "create spans", "assinar contratos"]
+}

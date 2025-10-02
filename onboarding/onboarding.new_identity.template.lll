@@ -1,0 +1,27 @@
+# LogLineID Onboarding Template - Nova Identidade
+
+identity {
+  handle: "@danvoulez"
+  internal_id: "logline-id://danvoulez"
+  origin: "humano"
+  created_at: {{timestamp}}
+  status: "validado"
+  auth_methods: ["senha", "biometria", "rfid"]
+  spans: [
+    span {
+      type: "identity_created"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://danvoulez"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+    }
+  ]
+  permissions: ["view timeline", "create spans", "assinar contratos"]
+}
+
+# Regras de onboarding:
+# - Gere um UUID computável para o span e para a identidade.
+# - O handle deve ser público, mas internamente sempre mapear para logline-id://.
+# - Sempre registre o span de criação no timeline computável.
+# - Permissões iniciais: view timeline, create spans, assinar contratos.
+# - Status inicial: validado (exceto onboarding ghost).

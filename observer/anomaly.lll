@@ -1,0 +1,18 @@
+(docstring observer.anomaly "Z-score da contagem/min, flag |z|>=3.")
+(contract observer.anomaly.lll
+  import engine.observer.aggregator.lll as agg
+  import sys.time as t
+  import bus.core as bus
+  state { last_z:f64=0.0; last_flag:bool=false; last_bucket:string="" }
+  def _bucket(ts:string)->string { return ts[0:16] }
+  entry detect->map {
+    ev=agg.latest(2000); buckets:map<string,u32>={}
+    for e in ev { k=_bucket(e.get("ts",t.now_iso())); buckets[k]=(buckets.get(k,0)+1) }
+    if len(buckets)==0 { last_z=0.0; last_flag=false; last_bucket=""; return {z:0.0,flag:false} }
+    vals:list<f64>=[]; for k,v in buckets { vals.push(to_f64(v)) }
+    mu=mean(vals); sd=stddev(vals); bk=max(keys_of(buckets)); x=to_f64(buckets[bk]); z=(sd==0.0)?0.0:(x-mu)/sd; flag=abs(z)>=3.0
+    last_z=z; last_flag=flag; last_bucket=bk; if flag { bus.publish("observer.anomaly",{bucket:bk,z:z}) }
+    return {bucket:bk,z:z,flag:flag}
+  }
+  view last->map { return {bucket:last_bucket,z:last_z,flag:last_flag} }
+)

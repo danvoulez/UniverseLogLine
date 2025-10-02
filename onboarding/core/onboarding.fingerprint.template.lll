@@ -1,0 +1,18 @@
+# Template computável para onboarding de fingerprint
+
+fingerprint_onboarding {
+  internal_id: "logline-id://{{handle}}"
+  fingerprint_hash: "{{fingerprint_hash}}"
+  match_score: {{match_score}}
+  validated_at: {{timestamp}}
+  status: "{{if match_score > 0.92}}validado{{else}}rejeitado{{endif}}"
+  span: {
+    type: "fingerprint_onboarding"
+    span_id: "{{uuid}}"
+    provenance: "onboarding"
+    agent: "logline-id://{{handle}}"
+    timestamp: {{timestamp}}
+    method: "fingerprint"
+    match_score: {{match_score}}
+  }
+}

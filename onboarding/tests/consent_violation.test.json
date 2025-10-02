@@ -1,0 +1,7 @@
+{
+  "name": "Consent Violation (placeholder)",
+  "expected": {
+    "action": "block",
+    "reason": "consent_required"
+  }
+}

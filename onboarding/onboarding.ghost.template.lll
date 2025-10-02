@@ -1,0 +1,21 @@
+# LogLineID Onboarding Template - Identidade Ghost
+
+identity {
+  handle: "@ghost_394x"
+  internal_id: "logline-id://ghost-394x"
+  origin: "humano"
+  created_at: {{timestamp}}
+  status: "ghost"
+  auth_methods: ["senha temporária", "rfid_efêmero"]
+  spans: [
+    span {
+      type: "ghost_identity_created"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://ghost-394x"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+    }
+  ]
+  permissions: ["view timeline", "create spans"]
+  expiration: "{{timestamp + 48h}}"
+}

@@ -1,0 +1,32 @@
+contract websocket_server version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.ws_server"; description: "Servidor WebSocket com spans de conexão/mensagem e evento para orquestrador."; }
+
+  params: { host: "0.0.0.0", port: 8765, heartbeat_secs: 20 }
+
+  on start:
+    bind websocket at (params.host + ":" + to_string(params.port)) with { heartbeat_secs: params.heartbeat_secs };
+    emit_span "ws_server_bound" { host: params.host, port: params.port, ts: now() };
+
+  on connect as c:
+    tag_session c.id with { ip: c.ip };
+    emit_span "ws_connect" { session_id: c.id, ip: c.ip, ts: now() };
+
+  on message as m:
+    let parsed = try_parse_json(m.text);
+    if parsed.error != null {
+      emit_span "ws_bad_json" { session_id: m.session_id, err: parsed.error, ts: now() };
+      // opcional: send back error
+      // send m.session_id { type: "error", reason: "invalid_json" }
+      return;
+    }
+    let payload = {
+      id: m.id, session_id: m.session_id, ip: session_ip(m.session_id),
+      headers: m.headers, origin: m.origin, data: parsed.value,
+      tenant_id: m.headers["x-tenant-id"] ?? null
+    };
+    emit_span "ws_message_in" { session_id: m.session_id, size: sizeof(m.text), ts: now() };
+    emit_event "ws.message" with payload;
+
+  on disconnect as d:
+    emit_event "ws.disconnect" with { session_id: d.session_id, reason: d.reason ?? "unknown" };
+}

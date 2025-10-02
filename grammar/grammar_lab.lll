@@ -1,0 +1,616 @@
+/// # Grammar Lab - Gramática Local para Laboratório
+///
+/// Gramática específica para o projeto Lab (laboratório de experimentos).
+/// Define entidades, regras de enforcement, modelo de tempo
+/// e workflows específicos para experimentos científicos.
+///
+/// Esta gramática estende grammar_core e adiciona:
+/// - Entidades: experimento, hipotese, resultado, dataset
+/// - Tempo: ciclos de experimento com intervalos configuráveis
+/// - Enforcement: regras de validação científica e reprodutibilidade
+/// - Workflows: planejamento -> execução -> análise -> publicação
+
+grammar_lab {
+    name: "lab",
+    version: "2.1.0",
+    extends: "grammar_core@1.0.0",
+    hash: "sha256:lab_v2_1_0_hash_placeholder",
+    created_at: "2025-09-27T15:30:00Z",
+    author: "lab_project",
+    
+    /// Modelo de tempo específico: ciclos de experimento
+    time_model: {
+        name: "ciclos_experimento",
+        unit: "cycles",
+        
+        /// Configuração de ciclos experimentais
+        cycle_config: {
+            /// Duração padrão de um ciclo (em horas)
+            default_cycle_duration_hours: 4,
+            
+            /// Intervalo mínimo entre ciclos (cooldown)
+            minimum_cooldown_hours: 1,
+            
+            /// Horários permitidos para experimentos
+            allowed_experiment_hours: [6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 20, 21, 22],
+            
+            /// Dias da semana permitidos
+            allowed_days: [1, 2, 3, 4, 5, 6], // Segunda a sábado
+            
+            /// Períodos de manutenção (sem experimentos)
+            maintenance_periods: [
+                {
+                    start: "2025-12-24T00:00:00Z",
+                    end: "2025-12-26T23:59:59Z",
+                    reason: "Holiday maintenance"
+                }
+            ]
+        },
+        
+        /// Fórmulas de cálculo temporal específicas
+        calculation_rules: [
+            {
+                name: "duracao_experimento",
+                formula: "fim_experimento - inicio_experimento",
+                description: "Calcula duração total do experimento em ciclos"
+            },
+            {
+                name: "tempo_ate_proximo_ciclo",
+                formula: "proximo_ciclo_disponivel - ciclo_atual",
+                description: "Calcula quando próximo ciclo estará disponível"
+            },
+            {
+                name: "utilizacao_laboratorio",
+                formula: "ciclos_usados / ciclos_disponiveis",
+                description: "Calcula percentual de utilização do laboratório"
+            },
+            {
+                name: "tempo_medio_experimento",
+                formula: "sum(duracao_experimentos) / count(experimentos)",
+                description: "Calcula tempo médio de duração dos experimentos"
+            },
+            {
+                name: "eficiencia_ciclo",
+                formula: "experimentos_concluidos / ciclos_iniciados",
+                description: "Calcula eficiência dos ciclos experimentais"
+            }
+        ]
+    },
+    
+    /// Regras de enforcement específicas para laboratório
+    enforcement: {
+        rules: [
+            {
+                rule_id: "hipotese_obrigatoria",
+                rule_type: "field_validation",
+                expression: "hipotese != null && hipotese.length >= 20",
+                priority: 200,
+                scope: "project",
+                description: "Experimento deve ter hipótese com pelo menos 20 caracteres",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "dataset_minimo",
+                rule_type: "business_rule",
+                expression: "dataset.sample_size >= 3",
+                priority: 180,
+                scope: "project",
+                description: "Dataset deve ter pelo menos 3 amostras",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "reproducibilidade",
+                rule_type: "business_rule",
+                expression: "metodologia != null && parametros != null",
+                priority: 190,
+                scope: "project",
+                description: "Experimento deve ter metodologia e parâmetros documentados",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "limite_duracao",
+                rule_type: "business_rule",
+                expression: "duracao_maxima_ciclos <= 24", // Máximo 4 dias
+                priority: 150,
+                scope: "project",
+                description: "Experimento não pode durar mais que 24 ciclos (4 dias)",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "pesquisador_responsavel",
+                rule_type: "field_validation",
+                expression: "pesquisador_principal != null && pesquisador_principal.credentials != null",
+                priority: 170,
+                scope: "project",
+                description: "Deve ter pesquisador principal com credenciais válidas",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "aprovacao_etica",
+                rule_type: "workflow_transition",
+                expression: "status == 'aprovado_etica' before transition to 'em_execucao'",
+                priority: 250,
+                scope: "project",
+                description: "Experimento deve ter aprovação ética antes da execução",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "dados_anonimizados",
+                rule_type: "business_rule",
+                expression: "if (envolve_dados_pessoais) then (dados_anonimizados == true)",
+                priority: 220,
+                scope: "project",
+                description: "Dados pessoais devem ser anonimizados",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "backup_resultados",
+                rule_type: "business_rule",
+                expression: "resultados.backup_location != null",
+                priority: 100,
+                scope: "project",
+                description: "Resultados devem ter backup configurado",
+                violation_action: "warn_and_continue"
+            }
+        ],
+        
+        /// Triggers automáticos
+        triggers: [
+            {
+                trigger_id: "auto_backup_resultados",
+                condition: "on_update(resultados) && resultados.data.length > 0",
+                action: "create_backup(resultados, 'lab_backup_system')",
+                automatic: true,
+                description: "Cria backup automático quando resultados são atualizados"
+            },
+            {
+                trigger_id: "notificar_ciclo_longo",
+                condition: "duracao_atual > duracao_maxima_ciclos * 0.8",
+                action: "notify_researcher('experimento_longo')",
+                automatic: true,
+                description: "Notifica quando experimento está chegando no limite de duração"
+            },
+            {
+                trigger_id: "liberar_recursos",
+                condition: "status == 'concluido' || status == 'cancelado'",
+                action: "release_lab_resources(experimento_id)",
+                automatic: true,
+                description: "Libera recursos do laboratório quando experimento termina"
+            },
+            {
+                trigger_id: "validar_hipotese",
+                condition: "status == 'concluido' && resultados != null",
+                action: "run_hypothesis_validation(hipotese, resultados)",
+                automatic: true,
+                description: "Executa validação automática da hipótese com base nos resultados"
+            },
+            {
+                trigger_id: "agendar_limpeza",
+                condition: "status == 'concluido' && usa_equipamento_biologico == true",
+                action: "schedule_equipment_cleaning(equipamentos_usados)",
+                automatic: true,
+                description: "Agenda limpeza de equipamentos biológicos após experimento"
+            }
+        ],
+        
+        /// Requisitos de testemunha
+        witness_requirements: {
+            "ethical_approval": {
+                required_roles: ["ethics_committee", "lab_supervisor"],
+                minimum_signatures: 2,
+                timeout_hours: 168 // 1 semana
+            },
+            "dangerous_experiments": {
+                required_roles: ["safety_officer", "lab_supervisor", "principal_investigator"],
+                minimum_signatures: 3,
+                timeout_hours: 72
+            },
+            "expensive_resources": {
+                required_roles: ["resource_manager", "principal_investigator"],
+                minimum_signatures: 2,
+                timeout_hours: 48
+            },
+            "data_publication": {
+                required_roles: ["data_curator", "principal_investigator"],
+                minimum_signatures: 2,
+                timeout_hours: 120 // 5 dias
+            }
+        }
+    },
+    
+    /// Entidades específicas do domínio
+    domain_entities: {
+        /// Entidade principal: experimento
+        experimento: {
+            description: "Experimento científico completo",
+            required_fields: {
+                id: "logline_id",
+                titulo: "string",
+                hipotese: "string",
+                metodologia: "string",
+                pesquisador_principal: "string",
+                data_inicio: "timestamp",
+                duracao_maxima_ciclos: "integer",
+                status: "string",
+                area_conhecimento: "string"
+            },
+            optional_fields: {
+                co_pesquisadores: "array",
+                objetivo: "string",
+                literatura_base: "array",
+                equipamentos_necessarios: "array",
+                materiais_necessarios: "array",
+                parametros: "object",
+                variaveis_controle: "array",
+                variaveis_dependentes: "array",
+                variaveis_independentes: "array",
+                criterios_sucesso: "array",
+                riscos_identificados: "array",
+                aprovacao_etica_numero: "string",
+                data_aprovacao_etica: "timestamp",
+                financiamento: "object",
+                custo_estimado: "number",
+                data_fim_real: "timestamp",
+                observacoes: "string"
+            },
+            immutable_fields: ["id", "data_inicio", "pesquisador_principal"],
+            field_constraints: {
+                titulo: ["titulo.length >= 10", "titulo.length <= 200"],
+                hipotese: ["hipotese.length >= 20", "hipotese.length <= 1000"],
+                metodologia: ["metodologia.length >= 50"],
+                duracao_maxima_ciclos: ["duracao_maxima_ciclos > 0", "duracao_maxima_ciclos <= 24"],
+                status: ["status in ['planejamento', 'aprovacao_etica', 'aprovado_etica', 'em_execucao', 'pausado', 'concluido', 'cancelado']"],
+                area_conhecimento: ["area_conhecimento in ['biologia', 'quimica', 'fisica', 'computacao', 'matematica', 'psicologia', 'medicina', 'engenharia']"]
+            }
+        },
+        
+        /// Entidade para datasets
+        dataset: {
+            description: "Conjunto de dados do experimento",
+            required_fields: {
+                id: "logline_id",
+                experimento_id: "logline_id",
+                nome: "string",
+                tipo_dados: "string",
+                sample_size: "integer",
+                data_coleta: "timestamp",
+                formato: "string"
+            },
+            optional_fields: {
+                descricao: "string",
+                fonte: "string",
+                metadados: "object",
+                schema: "object",
+                qualidade_dados: "string",
+                validacao_realizada: "boolean",
+                dados_anonimizados: "boolean",
+                backup_location: "string",
+                checksum: "string",
+                versao: "string"
+            },
+            immutable_fields: ["id", "experimento_id", "data_coleta"],
+            field_constraints: {
+                sample_size: ["sample_size >= 3"],
+                tipo_dados: ["tipo_dados in ['numerico', 'categorico', 'textual', 'temporal', 'imagem', 'audio', 'video', 'sensor', 'genomico']"],
+                formato: ["formato in ['csv', 'json', 'xml', 'parquet', 'hdf5', 'xlsx', 'sql', 'binary']"],
+                qualidade_dados: ["qualidade_dados in ['alta', 'media', 'baixa', 'nao_avaliada']"]
+            }
+        },
+        
+        /// Entidade para resultados
+        resultado: {
+            description: "Resultados e análises do experimento",
+            required_fields: {
+                id: "logline_id",
+                experimento_id: "logline_id",
+                tipo_resultado: "string",
+                data_analise: "timestamp",
+                analista: "string"
+            },
+            optional_fields: {
+                descricao: "string",
+                dados_brutos: "object",
+                dados_processados: "object",
+                estatisticas: "object",
+                graficos: "array",
+                interpretacao: "string",
+                conclusoes: "string",
+                hipotese_confirmada: "boolean",
+                significancia_estatistica: "number",
+                confianca_resultado: "string",
+                limitacoes: "array",
+                recomendacoes: "array",
+                arquivos_resultado: "array",
+                publicacao_candidata: "boolean"
+            },
+            immutable_fields: ["id", "experimento_id", "data_analise"],
+            field_constraints: {
+                tipo_resultado: ["tipo_resultado in ['preliminar', 'parcial', 'final', 'meta_analise']"],
+                significancia_estatistica: ["significancia_estatistica >= 0", "significancia_estatistica <= 1"],
+                confianca_resultado: ["confianca_resultado in ['muito_alta', 'alta', 'media', 'baixa', 'muito_baixa']"]
+            }
+        },
+        
+        /// Entidade para recursos do laboratório
+        recurso_lab: {
+            description: "Recurso físico ou digital do laboratório",
+            required_fields: {
+                id: "logline_id",
+                nome: "string",
+                tipo: "string",
+                status: "string",
+                localizacao: "string"
+            },
+            optional_fields: {
+                descricao: "string",
+                especificacoes: "object",
+                data_aquisicao: "timestamp",
+                valor: "number",
+                fornecedor: "string",
+                manutencao_agendada: "timestamp",
+                responsavel: "string",
+                uso_atual: "string",
+                experimento_atual: "logline_id",
+                capacidade_maxima: "integer",
+                utilizacao_atual: "integer"
+            },
+            immutable_fields: ["id"],
+            field_constraints: {
+                tipo: ["tipo in ['equipamento', 'software', 'reagente', 'vidraria', 'espaco_fisico', 'computacional']"],
+                status: ["status in ['disponivel', 'em_uso', 'manutencao', 'quebrado', 'reservado']"],
+                utilizacao_atual: ["utilizacao_atual >= 0", "utilizacao_atual <= capacidade_maxima"]
+            }
+        }
+    },
+    
+    /// Workflows específicos
+    workflows: {
+        /// Workflow principal do experimento
+        experimento_lifecycle: {
+            description: "Ciclo de vida completo de um experimento",
+            initial_state: "planejamento",
+            
+            states: {
+                planejamento: {
+                    description: "Experimento sendo planejado",
+                    auto_transitions: []
+                },
+                aprovacao_etica: {
+                    description: "Aguardando aprovação do comitê de ética",
+                    auto_transitions: []
+                },
+                aprovado_etica: {
+                    description: "Aprovado pelo comitê de ética",
+                    auto_transitions: []
+                },
+                em_execucao: {
+                    description: "Experimento em andamento",
+                    auto_transitions: ["notificar_ciclo_longo", "auto_backup_resultados"]
+                },
+                pausado: {
+                    description: "Experimento temporariamente pausado",
+                    auto_transitions: []
+                },
+                concluido: {
+                    description: "Experimento concluído com sucesso",
+                    auto_transitions: ["liberar_recursos", "validar_hipotese", "agendar_limpeza"]
+                },
+                cancelado: {
+                    description: "Experimento cancelado",
+                    auto_transitions: ["liberar_recursos"]
+                }
+            },
+            
+            transitions: [
+                {
+                    from_state: "planejamento",
+                    to_state: "aprovacao_etica",
+                    condition: "metodologia_completa && hipotese_definida && envolve_questoes_eticas == true",
+                    required_roles: ["researcher", "lab_supervisor"]
+                },
+                {
+                    from_state: "planejamento",
+                    to_state: "aprovado_etica",
+                    condition: "metodologia_completa && hipotese_definida && envolve_questoes_eticas == false",
+                    required_roles: ["researcher", "lab_supervisor"]
+                },
+                {
+                    from_state: "aprovacao_etica",
+                    to_state: "aprovado_etica",
+                    condition: "aprovacao_etica_numero != null",
+                    required_roles: ["ethics_committee"]
+                },
+                {
+                    from_state: "aprovado_etica",
+                    to_state: "em_execucao",
+                    condition: "recursos_alocados && cronograma_definido",
+                    required_roles: ["principal_investigator", "lab_supervisor"]
+                },
+                {
+                    from_state: "em_execucao",
+                    to_state: "pausado",
+                    condition: "necessita_pausa",
+                    required_roles: ["principal_investigator"]
+                },
+                {
+                    from_state: "pausado",
+                    to_state: "em_execucao",
+                    condition: "condicoes_para_retomar_atendidas",
+                    required_roles: ["principal_investigator"]
+                },
+                {
+                    from_state: "em_execucao",
+                    to_state: "concluido",
+                    condition: "objetivos_alcancados && dados_coletados && analise_concluida",
+                    required_roles: ["principal_investigator"]
+                },
+                {
+                    from_state: "planejamento",
+                    to_state: "cancelado",
+                    condition: "cancelamento_justificado",
+                    required_roles: ["principal_investigator", "lab_supervisor"]
+                },
+                {
+                    from_state: "aprovacao_etica",
+                    to_state: "cancelado",
+                    condition: "reprovado_etica || cancelamento_voluntario",
+                    required_roles: ["principal_investigator"]
+                },
+                {
+                    from_state: "em_execucao",
+                    to_state: "cancelado",
+                    condition: "problemas_insuperaveis || mudanca_contexto",
+                    required_roles: ["principal_investigator", "lab_supervisor"]
+                }
+            ]
+        },
+        
+        /// Workflow de análise de dados
+        analise_dados_workflow: {
+            description: "Fluxo de análise de dados experimentais",
+            initial_state: "dados_coletados",
+            
+            states: {
+                dados_coletados: {
+                    description: "Dados foram coletados",
+                    auto_transitions: ["auto_backup_resultados"]
+                },
+                limpeza_dados: {
+                    description: "Dados sendo limpos e preparados",
+                    auto_transitions: []
+                },
+                analise_exploratoria: {
+                    description: "Análise exploratória em andamento",
+                    auto_transitions: []
+                },
+                analise_estatistica: {
+                    description: "Análise estatística formal",
+                    auto_transitions: []
+                },
+                interpretacao: {
+                    description: "Interpretação dos resultados",
+                    auto_transitions: []
+                },
+                revisao: {
+                    description: "Revisão por pares",
+                    auto_transitions: []
+                },
+                finalizado: {
+                    description: "Análise finalizada",
+                    auto_transitions: []
+                }
+            },
+            
+            transitions: [
+                {
+                    from_state: "dados_coletados",
+                    to_state: "limpeza_dados",
+                    condition: "dados_validados",
+                    required_roles: ["data_analyst", "researcher"]
+                },
+                {
+                    from_state: "limpeza_dados",
+                    to_state: "analise_exploratoria",
+                    condition: "dados_limpos_validados",
+                    required_roles: ["data_analyst"]
+                },
+                {
+                    from_state: "analise_exploratoria",
+                    to_state: "analise_estatistica",
+                    condition: "padroes_identificados",
+                    required_roles: ["statistician", "data_analyst"]
+                },
+                {
+                    from_state: "analise_estatistica",
+                    to_state: "interpretacao",
+                    condition: "testes_estatisticos_concluidos",
+                    required_roles: ["statistician", "principal_investigator"]
+                },
+                {
+                    from_state: "interpretacao",
+                    to_state: "revisao",
+                    condition: "interpretacao_documentada",
+                    required_roles: ["principal_investigator"]
+                },
+                {
+                    from_state: "revisao",
+                    to_state: "finalizado",
+                    condition: "revisao_aprovada",
+                    required_roles: ["peer_reviewer", "principal_investigator"]
+                }
+            ]
+        }
+    },
+    
+    /// Configurações específicas do projeto
+    project_config: {
+        /// Áreas de conhecimento suportadas
+        supported_knowledge_areas: [
+            "biologia", "quimica", "fisica", "computacao", 
+            "matematica", "psicologia", "medicina", "engenharia"
+        ],
+        
+        /// Limites de recursos
+        max_concurrent_experiments: 10,
+        max_experiment_duration_cycles: 24,
+        default_cycle_duration_hours: 4,
+        
+        /// Configurações de backup
+        backup_settings: {
+            auto_backup_enabled: true,
+            backup_frequency_hours: 6,
+            retention_period_days: 1825, // 5 anos
+            backup_locations: ["primary_storage", "cloud_backup", "archive"]
+        },
+        
+        /// Configurações de notificação
+        notification_settings: {
+            experiment_status_changes: true,
+            resource_conflicts: true,
+            deadline_reminders: true,
+            safety_alerts: true,
+            maintenance_schedules: true
+        },
+        
+        /// Configurações de segurança
+        security_settings: {
+            data_encryption: "aes256",
+            access_logging: true,
+            experiment_isolation: true,
+            sensitive_data_handling: "strict"
+        }
+    },
+    
+    /// Integração com outros sistemas
+    integrations: {
+        /// Sistema de agendamento de recursos
+        resource_scheduler: {
+            provider: "lab_resource_manager",
+            auto_conflict_resolution: true,
+            priority_based_allocation: true
+        },
+        
+        /// Sistema de análise estatística
+        statistical_analysis: {
+            provider: "r_statistical_engine",
+            auto_significance_testing: true,
+            supported_tests: ["t_test", "anova", "chi_square", "regression", "correlation"]
+        },
+        
+        /// Sistema de backup
+        backup_system: {
+            provider: "distributed_backup",
+            real_time_sync: true,
+            version_control: true,
+            integrity_checking: true
+        },
+        
+        /// Sistema de publicação
+        publication_system: {
+            provider: "scientific_journal_api",
+            auto_formatting: true,
+            peer_review_workflow: true,
+            preprint_servers: ["arxiv", "biorxiv", "medrxiv"]
+        }
+    }
+}

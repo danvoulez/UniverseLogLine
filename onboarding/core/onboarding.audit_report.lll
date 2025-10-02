@@ -1,0 +1,14 @@
+# Relatório computável de auditoria do onboarding
+
+audit_report {
+  period: "{{start_date}} - {{end_date}}"
+  identities_created: {{identities_created}}
+  ghost_expired: {{ghost_expired}}
+  biometrias_validadas: {{biometrias_validadas}}
+  rfids_ativados: {{rfids_ativados}}
+  contratos_assinados: {{contratos_assinados}}
+  identidades_revogadas: {{identidades_revogadas}}
+  inconsistencies_found: {{inconsistencies_found}}
+  exported_at: {{timestamp}}
+  export_format: "{{format}}"
+}

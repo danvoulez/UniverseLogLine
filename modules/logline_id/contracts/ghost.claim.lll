@@ -1,0 +1,239 @@
+contract ghost.claim {
+  flow: "ghost.claim",
+  
+  metadata: {
+    name: "Reivindicação de Identidade Ghost",
+    description: "Converte identidade ghost temporária em identidade permanente",
+    version: "1.0.0",
+    author: "logline-system"
+  },
+  
+  input: {
+    ghost_id: {
+      type: "string",
+      required: true,
+      pattern: "^logline-id://[a-zA-Z0-9_-]+/ghost\\.[a-zA-Z0-9]+$",
+      description: "ID ghost temporário a ser reivindicado"
+    },
+    
+    new_alias: {
+      type: "string",
+      required: true,
+      pattern: "^@?[a-zA-Z0-9_.-]+$", 
+      max_length: 50,
+      description: "Novo alias permanente desejado"
+    },
+    
+    public_key: {
+      type: "string",
+      required: true,
+      pattern: "^[a-zA-Z0-9+/=]+$",
+      description: "Nova chave pública ed25519 para identidade permanente"
+    },
+    
+    verification_data: {
+      type: "object",
+      required: false,
+      properties: {
+        biometric_confirmation: "string",
+        email_verification: "string",
+        phone_verification: "string",
+        manual_approval: "string"
+      },
+      description: "Dados de verificação para aprovação"
+    },
+    
+    desired_roles: {
+      type: "list",
+      items: {
+        type: "enum", 
+        options: ["user", "validator", "observer"]
+      },
+      default: ["user"],
+      description: "Papéis desejados (limitados para claims)"
+    }
+  },
+  
+  output: {
+    success: {
+      type: "boolean",
+      description: "Indica se a reivindicação foi aprovada"
+    },
+    
+    new_logline_id: {
+      type: "string",
+      pattern: "^logline-id://[a-zA-Z0-9_-]+/[a-zA-Z0-9_@.-]+$",
+      description: "Nova identidade permanente"
+    },
+    
+    migrated_spans: {
+      type: "integer",
+      description: "Número de spans migrados da identidade ghost"
+    },
+    
+    new_capabilities: {
+      type: "list",
+      items: "string",
+      description: "Capacidades da nova identidade"
+    },
+    
+    transition_receipt: {
+      type: "string",
+      description: "Recibo da transição ghost→permanente"
+    }
+  },
+  
+  logic: {
+    validation: [
+      "validate_ghost_exists(ghost_id)",
+      "validate_ghost_is_claimable(ghost_id)",
+      "validate_alias_available(new_alias, node_from_ghost_id)",
+      "validate_public_key_format(public_key)",
+      "validate_verification_data(verification_data)"
+    ],
+    
+    execution: [
+      "load_ghost_identity(ghost_id)",
+      "validate_claim_eligibility(ghost_id, executor)",
+      "create_permanent_identity(new_alias, public_key, desired_roles)",
+      "migrate_ghost_spans(ghost_id, new_logline_id)",
+      "update_span_signatures(ghost_id, new_logline_id)",
+      "revoke_ghost_status(ghost_id)",
+      "emit_identity_claimed_receipt(ghost_id, new_logline_id)",
+      "notify_network_identity_transition(ghost_id, new_logline_id)"
+    ],
+    
+    rollback: [
+      "restore_ghost_identity(ghost_id)",
+      "revert_span_migrations(ghost_id, new_logline_id)", 
+      "delete_permanent_identity(new_logline_id)",
+      "emit_claim_failed_span(ghost_id, reason)"
+    ]
+  },
+  
+  enforcement: {
+    pre_conditions: [
+      "ghost_id.status == 'ghost'",
+      "ghost_id.created_at > now() - 30_days",
+      "new_alias.not_exists_in_node()",
+      "executor.has_claim_authority(ghost_id)",
+      "verification_data.is_sufficient()"
+    ],
+    
+    post_conditions: [
+      "new_logline_id.status == 'active'",
+      "ghost_id.status == 'claimed'",
+      "migrated_spans.count > 0",
+      "transition_receipt.exists()"
+    ],
+    
+    security: [
+      "require_signature_verification(executor)",
+      "audit_all_ghost_claims()",
+      "rate_limit_claims_per_ghost(1_per_ghost)",
+      "verify_no_duplicate_claims(ghost_id)"
+    ],
+    
+    time_constraints: [
+      "ghost_id.age < 30_days",
+      "claim_window.open == true",
+      "execution_time < 5_minutes"
+    ]
+  },
+  
+  workflows: {
+    ghost_claim: {
+      initial: "ghost_verification",
+      states: {
+        ghost_verification: {
+          actions: ["validate_ghost_exists", "check_claim_eligibility"],
+          transitions: ["verification_data_check", "claim_rejected"]
+        },
+        
+        verification_data_check: {
+          actions: ["validate_verification_data", "check_alias_availability"],
+          transitions: ["identity_creation", "additional_verification_required"]
+        },
+        
+        additional_verification_required: {
+          actions: ["request_manual_approval", "notify_administrators"],
+          transitions: ["pending_approval", "claim_rejected"]
+        },
+        
+        pending_approval: {
+          actions: ["wait_for_approval"],
+          transitions: ["identity_creation", "claim_rejected"],
+          timeout: "24_hours"
+        },
+        
+        identity_creation: {
+          actions: ["create_permanent_identity", "migrate_ghost_data"],
+          transitions: ["span_migration", "creation_failed"]
+        },
+        
+        span_migration: {
+          actions: ["migrate_spans", "update_signatures", "validate_migration"],
+          transitions: ["claim_completed", "migration_failed"]
+        },
+        
+        claim_completed: {
+          actions: ["emit_success_receipt", "notify_network"],
+          final: true
+        },
+        
+        claim_rejected: {
+          actions: ["emit_rejection_receipt", "log_rejection_reason"],
+          final: true
+        },
+        
+        creation_failed: {
+          actions: ["rollback_changes", "emit_failure_receipt"],
+          final: true
+        },
+        
+        migration_failed: {
+          actions: ["rollback_identity", "restore_ghost", "emit_failure_receipt"],
+          final: true
+        }
+      }
+    }
+  },
+  
+  examples: [
+    {
+      name: "Reivindicação Ghost Simples",
+      input: {
+        ghost_id: "logline-id://macmini-loja/ghost.abc123",
+        new_alias: "@novousuario",
+        public_key: "P9Q8R7S6T5U4V3...",
+        desired_roles: ["user"]
+      },
+      expected_output: {
+        success: true,
+        new_logline_id: "logline-id://macmini-loja/novousuario",
+        migrated_spans: 15,
+        new_capabilities: ["create_spans", "sign_basic_contracts"]
+      }
+    },
+    
+    {
+      name: "Reivindicação com Verificação Biométrica",
+      input: {
+        ghost_id: "logline-id://macmini-dan/ghost.xyz789",
+        new_alias: "@verificado.bio",
+        public_key: "B2C3D4E5F6G7H8...",
+        verification_data: {
+          biometric_confirmation: "fingerprint_verified",
+          email_verification: "confirmed_at_2025-09-28"
+        },
+        desired_roles: ["user", "validator"]
+      },
+      expected_output: {
+        success: true,
+        new_logline_id: "logline-id://macmini-dan/verificado.bio",
+        migrated_spans: 32,
+        new_capabilities: ["create_spans", "validate_signatures", "participate_consensus"]
+      }
+    }
+  ]
+}

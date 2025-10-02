@@ -1,0 +1,43 @@
+module ui_components
+version: "1.0.0"
+
+flow generate_onboarding_ui
+  inputs: tenant_id, branding
+  outputs: { react_component: string }
+  steps:
+    - return template("""
+      import { useState, useEffect } from 'react';
+      import QRCode from 'qrcode.react';
+
+      export function LogLineOnboarding() {
+        const [token, setToken] = useState('');
+        const [qrValue, setQrValue] = useState('');
+        const [status, setStatus] = useState('waiting');
+
+        useEffect(() => {
+          fetch('/api/logline/onboarding/token?tenant={{tenant_id}}')
+            .then(r => r.json())
+            .then(d => {
+              setToken(d.token);
+              setQrValue(`logline://onboard?t=${d.token}&tid={{tenant_id}}`);
+            });
+        }, []);
+
+        return (
+          <div className="onboarding-container" style={{
+            background: 'linear-gradient(135deg, {{branding.color1}}, {{branding.color2}})',
+            padding: '2rem', borderRadius: '1rem', color: '#fff'
+          }}>
+            <h2>Quick Setup</h2>
+            {status === 'waiting' && (
+              <>
+                <QRCode value={qrValue} size={220} />
+                <p>Scan com o app LogLine ou rode:</p>
+                <code>curl -sSL https://logline.sh | sh -s -- {token}</code>
+              </>
+            )}
+            {status === 'connected' && <div className="success">✅ Node conectado!</div>}
+          </div>
+        );
+      }
+      """, { tenant_id, branding })

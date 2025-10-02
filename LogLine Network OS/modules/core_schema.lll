@@ -1,0 +1,81 @@
+module core_schema
+version: "2.0.0"
+
+# Tipos-base
+type uuid
+type datetime
+type pubkey
+type bytes
+type url
+type cid
+type percent
+type duration
+type money_eur
+type vec2f      # (x,y) metros
+type vec3f      # (x,y,z) metros
+type mTesla     # campo magnético em mT
+type radians
+type json
+
+enum DeviceType [mac, iphone, raspberry, remote_node, llm, storage_only, interface_only]
+enum OSType [macos, ios, linux, wasm]
+enum NetProto [ssh, grpc, http, nfc, airplay, wireguard]
+enum MetricType [cpu, ram, disk, network, io, gpu, energy, temp]
+enum ContractState [draft, queued, running, succeeded, failed, cancelled]
+enum Priority [low, normal, high, urgent]
+enum Cipher [none, aes_gcm, chacha20_poly1305, age]
+enum FS [zfs, apfs, ext4, btrfs]
+enum RiskLevel [low, medium, high, critical]
+
+entity Tenant
+  key: tenant_id (string)
+  properties:
+    - tenant_id: string
+    - display_name: string
+    - primary_color: string
+    - active: bool = true
+    - created_at: datetime
+
+entity Contract
+  key: contract_id (uuid)
+  properties:
+    - contract_id: uuid
+    - tenant_id: string
+    - workflow: string
+    - priority: Priority = normal
+    - requirements: json               # {cpu_cores, ram_gb, disk_gb?, gpu:{count, mig_profile?}, locality?, affinity?, anti_affinity?}
+    - inputs: list[cid]
+    - outputs: list[cid]
+    - state: ContractState = draft
+    - created_at: datetime
+    - ttl: duration = "10m"
+    - deadline: datetime?
+    - max_retries: int = 2
+    - hedging_ms: int = 0
+    - budget_eur: money_eur = 0.00
+    - labels: list[string] = []
+
+fsm Contract.state
+  draft -> queued on queue()
+  queued -> running on start()
+  running -> succeeded on finish()
+  running -> failed on fail(reason)
+  queued -> cancelled on cancel()
+  running -> cancelled on cancel()
+
+entity Span
+  key: span_id (uuid)
+  properties:
+    - span_id: uuid
+    - tenant_id: string
+    - contract_id: uuid
+    - node_id: string
+    - status: string
+    - started_at: datetime
+    - finished_at: datetime?
+    - attrs: json
+    - signature: string?
+
+constraint deadline_enforced
+  on Contract when state in [queued, running]
+  ensure now() <= coalesce(deadline, created_at + ttl) else raise "deadline_exceeded"

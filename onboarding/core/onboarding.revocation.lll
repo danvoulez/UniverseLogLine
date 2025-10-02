@@ -1,0 +1,19 @@
+# Revogação de identidade computável
+
+revocation {
+  permitted_reasons: [
+    "solicitação do usuário",
+    "violação dos termos",
+    "expiração ghost",
+    "revogação institucional"
+  ]
+  span_type: "deleted"
+  process: [
+    "Registrar span de revogação na timeline",
+    "Atualizar status para 'revogado'",
+    "Desvincular permissões institucionais",
+    "Persistir em log de auditoria"
+  ]
+  recovery_window: "72h"
+  recovery_span_type: "recoverable"
+}

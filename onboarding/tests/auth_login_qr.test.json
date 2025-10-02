@@ -1,0 +1,10 @@
+{
+  "name": "Login via QR",
+  "input": {
+    "method": "qr",
+    "code": "PAIR-ABC-123"
+  },
+  "expected": {
+    "logline_id_prefix": "logline-id://user."
+  }
+}

@@ -1,0 +1,596 @@
+// passkey.register.lll - Smart contract for Passkey-based LogLine identity registration
+contract PasskeyRegister {
+    // Events
+    event PasskeyIdentityRegistered(
+        string indexed alias,
+        bytes32 indexed public_key_hash,
+        string credential_id,
+        string authenticator_type,
+        uint256 timestamp
+    );
+    
+    event BiometricVerificationCompleted(
+        string indexed alias,
+        string device_type,
+        bool backup_eligible,
+        uint256 timestamp
+    );
+    
+    event PasskeyGhostCreated(
+        string indexed ghost_alias,
+        string indexed parent_alias,
+        string credential_id,
+        uint256 expires_at,
+        string purpose
+    );
+
+    // Structures
+    struct PasskeyIdentity {
+        string id;
+        string alias;
+        string owner_type;
+        bytes32 public_key_hash;
+        string credential_id;
+        uint256 created_at;
+        uint256 updated_at;
+        string status;
+        string[] capabilities;
+        string federation_level;
+        PasskeyMetadata metadata;
+    }
+
+    struct PasskeyMetadata {
+        string authenticator_aaguid;
+        string device_type;
+        string platform;
+        bool backup_eligible;
+        bool backup_state;
+        bool user_verification;
+        bool resident_key;
+        bytes authenticator_data;
+    }
+
+    struct WebAuthnCredential {
+        string credential_id;
+        bytes public_key_raw;
+        bytes authenticator_data;
+        string client_data_json;
+        bytes signature;
+    }
+
+    struct BiometricProof {
+        string device_type;
+        string platform_info;
+        bytes biometric_hash;
+        uint256 verification_timestamp;
+        bool user_present;
+        bool user_verified;
+    }
+
+    // Storage
+    mapping(string => PasskeyIdentity) public passkey_identities;
+    mapping(string => string) public credential_to_alias;
+    mapping(bytes32 => bool) public public_key_registry;
+    mapping(string => uint256) public ghost_expiration;
+    
+    // State variables
+    uint256 public total_identities;
+    uint256 public total_ghost_identities;
+    address public contract_owner;
+    bool public registration_paused;
+
+    // Modifiers
+    modifier onlyActiveIdentity(string memory alias) {
+        require(
+            keccak256(abi.encodePacked(passkey_identities[alias].status)) == 
+            keccak256(abi.encodePacked("active")),
+            "Identity is not active"
+        );
+        _;
+    }
+
+    modifier validAlias(string memory alias) {
+        require(bytes(alias).length >= 3 && bytes(alias).length <= 32, "Invalid alias length");
+        require(isValidAliasFormat(alias), "Invalid alias format");
+        _;
+    }
+
+    modifier uniqueAlias(string memory alias) {
+        require(
+            bytes(passkey_identities[alias].id).length == 0,
+            "Alias already exists"
+        );
+        _;
+    }
+
+    modifier uniqueCredential(string memory credential_id) {
+        require(
+            bytes(credential_to_alias[credential_id]).length == 0,
+            "Credential already registered"
+        );
+        _;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == contract_owner, "Only contract owner");
+        _;
+    }
+
+    modifier whenNotPaused() {
+        require(!registration_paused, "Registration is paused");
+        _;
+    }
+
+    // Constructor
+    constructor() {
+        contract_owner = msg.sender;
+        registration_paused = false;
+        total_identities = 0;
+        total_ghost_identities = 0;
+    }
+
+    // Main registration function
+    function registerPasskeyIdentity(
+        string memory alias,
+        WebAuthnCredential memory credential,
+        BiometricProof memory biometric_proof
+    ) 
+        public
+        whenNotPaused
+        validAlias(alias)
+        uniqueAlias(alias)
+        uniqueCredential(credential.credential_id)
+    {
+        // Verify WebAuthn credential
+        require(
+            verifyWebAuthnCredential(credential, alias),
+            "Invalid WebAuthn credential"
+        );
+
+        // Verify biometric proof
+        require(
+            verifyBiometricProof(biometric_proof, credential.authenticator_data),
+            "Invalid biometric proof"
+        );
+
+        // Extract public key hash
+        bytes32 public_key_hash = keccak256(credential.public_key_raw);
+        
+        // Ensure public key is unique
+        require(!public_key_registry[public_key_hash], "Public key already registered");
+
+        // Create identity ID
+        string memory identity_id = generateIdentityId(alias, block.timestamp);
+
+        // Extract device type from biometric proof
+        string memory device_type = extractDeviceType(biometric_proof.device_type);
+
+        // Create passkey metadata
+        PasskeyMetadata memory metadata = PasskeyMetadata({
+            authenticator_aaguid: extractAAGUID(credential.authenticator_data),
+            device_type: device_type,
+            platform: biometric_proof.platform_info,
+            backup_eligible: extractBackupEligible(credential.authenticator_data),
+            backup_state: extractBackupState(credential.authenticator_data),
+            user_verification: biometric_proof.user_verified,
+            resident_key: true, // Required for LogLine
+            authenticator_data: credential.authenticator_data
+        });
+
+        // Create identity
+        PasskeyIdentity memory identity = PasskeyIdentity({
+            id: identity_id,
+            alias: alias,
+            owner_type: "passkey_individual",
+            public_key_hash: public_key_hash,
+            credential_id: credential.credential_id,
+            created_at: block.timestamp,
+            updated_at: block.timestamp,
+            status: "active",
+            capabilities: getDefaultCapabilities(),
+            federation_level: "local",
+            metadata: metadata
+        });
+
+        // Store identity
+        passkey_identities[alias] = identity;
+        credential_to_alias[credential.credential_id] = alias;
+        public_key_registry[public_key_hash] = true;
+        total_identities++;
+
+        // Emit events
+        emit PasskeyIdentityRegistered(
+            alias,
+            public_key_hash,
+            credential.credential_id,
+            device_type,
+            block.timestamp
+        );
+
+        emit BiometricVerificationCompleted(
+            alias,
+            device_type,
+            metadata.backup_eligible,
+            block.timestamp
+        );
+
+        // Generate and store receipt
+        generateRegistrationReceipt(identity, credential, biometric_proof);
+    }
+
+    // Create ghost identity with existing Passkey
+    function createPasskeyGhost(
+        string memory parent_alias,
+        string memory ghost_alias,
+        uint256 duration_hours,
+        string memory purpose,
+        BiometricProof memory biometric_proof
+    )
+        public
+        whenNotPaused
+        onlyActiveIdentity(parent_alias)
+        validAlias(ghost_alias)
+        uniqueAlias(ghost_alias)
+    {
+        require(duration_hours > 0 && duration_hours <= 168, "Invalid duration"); // Max 1 week
+        require(bytes(purpose).length > 0, "Purpose required");
+
+        PasskeyIdentity storage parent = passkey_identities[parent_alias];
+        
+        // Verify parent has ghost creation capability
+        require(hasCapability(parent.capabilities, "ghost_create"), "No ghost creation capability");
+
+        // Verify biometric proof matches parent
+        require(
+            verifyBiometricProofForGhost(biometric_proof, parent.metadata.authenticator_data),
+            "Invalid biometric proof for ghost creation"
+        );
+
+        // Calculate expiration
+        uint256 expires_at = block.timestamp + (duration_hours * 1 hours);
+
+        // Create ghost credential ID
+        string memory ghost_credential_id = string(
+            abi.encodePacked("ghost_", parent.credential_id, "_", toString(block.timestamp))
+        );
+
+        // Create ghost identity
+        PasskeyIdentity memory ghost_identity = PasskeyIdentity({
+            id: generateIdentityId(ghost_alias, block.timestamp),
+            alias: ghost_alias,
+            owner_type: "passkey_ghost",
+            public_key_hash: parent.public_key_hash, // Same biometric, different identity
+            credential_id: ghost_credential_id,
+            created_at: block.timestamp,
+            updated_at: block.timestamp,
+            status: "ghost",
+            capabilities: getGhostCapabilities(),
+            federation_level: "local",
+            metadata: parent.metadata // Inherit metadata
+        });
+
+        // Store ghost identity
+        passkey_identities[ghost_alias] = ghost_identity;
+        credential_to_alias[ghost_credential_id] = ghost_alias;
+        ghost_expiration[ghost_alias] = expires_at;
+        total_ghost_identities++;
+
+        emit PasskeyGhostCreated(
+            ghost_alias,
+            parent_alias,
+            ghost_credential_id,
+            expires_at,
+            purpose
+        );
+
+        // Schedule auto-expiration
+        scheduleGhostExpiration(ghost_alias, expires_at);
+    }
+
+    // Authenticate with Passkey
+    function authenticateWithPasskey(
+        string memory alias,
+        string memory credential_id,
+        bytes memory authenticator_data,
+        string memory client_data_json,
+        bytes memory signature
+    ) public view returns (bool) {
+        PasskeyIdentity storage identity = passkey_identities[alias];
+        
+        require(bytes(identity.id).length > 0, "Identity not found");
+        require(
+            keccak256(abi.encodePacked(identity.credential_id)) == 
+            keccak256(abi.encodePacked(credential_id)),
+            "Credential mismatch"
+        );
+
+        // Verify WebAuthn authentication signature
+        return verifyWebAuthnAuthentication(
+            identity.public_key_hash,
+            authenticator_data,
+            client_data_json,
+            signature
+        );
+    }
+
+    // Sign message with Passkey
+    function signWithPasskey(
+        string memory alias,
+        string memory message,
+        string memory credential_id,
+        bytes memory signature,
+        bytes memory authenticator_data,
+        string memory client_data_json
+    ) public onlyActiveIdentity(alias) returns (bool) {
+        PasskeyIdentity storage identity = passkey_identities[alias];
+        
+        require(
+            keccak256(abi.encodePacked(identity.credential_id)) == 
+            keccak256(abi.encodePacked(credential_id)),
+            "Credential mismatch"
+        );
+
+        // Verify message signature
+        bytes32 message_hash = keccak256(abi.encodePacked(message));
+        
+        return verifyPasskeyMessageSignature(
+            identity.public_key_hash,
+            message_hash,
+            signature,
+            authenticator_data,
+            client_data_json
+        );
+    }
+
+    // Utility Functions
+    function verifyWebAuthnCredential(
+        WebAuthnCredential memory credential,
+        string memory alias
+    ) internal pure returns (bool) {
+        // Simplified WebAuthn verification
+        // In production, implement full WebAuthn verification logic
+        return bytes(credential.credential_id).length > 0 && 
+               credential.public_key_raw.length >= 32 &&
+               bytes(alias).length > 0;
+    }
+
+    function verifyBiometricProof(
+        BiometricProof memory proof,
+        bytes memory authenticator_data
+    ) internal pure returns (bool) {
+        // Verify biometric proof authenticity
+        return proof.user_present && 
+               proof.user_verified && 
+               proof.verification_timestamp > 0 &&
+               authenticator_data.length > 0;
+    }
+
+    function verifyBiometricProofForGhost(
+        BiometricProof memory proof,
+        bytes memory parent_authenticator_data
+    ) internal pure returns (bool) {
+        // Verify ghost creation uses same biometric as parent
+        return verifyBiometricProof(proof, parent_authenticator_data) &&
+               keccak256(proof.biometric_hash) == keccak256(parent_authenticator_data);
+    }
+
+    function extractAAGUID(bytes memory authenticator_data) internal pure returns (string memory) {
+        // Extract AAGUID from authenticator data (bytes 37-52)
+        if (authenticator_data.length < 53) return "";
+        
+        bytes memory aaguid = new bytes(16);
+        for (uint i = 0; i < 16; i++) {
+            aaguid[i] = authenticator_data[37 + i];
+        }
+        
+        return bytesToHex(aaguid);
+    }
+
+    function extractDeviceType(string memory device_type_input) internal pure returns (string memory) {
+        // Normalize device type
+        if (compareStrings(device_type_input, "TouchID")) return "touchid";
+        if (compareStrings(device_type_input, "FaceID")) return "faceid";
+        if (compareStrings(device_type_input, "WindowsHello")) return "windows_hello";
+        if (compareStrings(device_type_input, "AndroidFingerprint")) return "fingerprint";
+        return "biometric";
+    }
+
+    function extractBackupEligible(bytes memory authenticator_data) internal pure returns (bool) {
+        if (authenticator_data.length < 33) return false;
+        // Bit 3 of flags byte indicates backup eligibility
+        return (uint8(authenticator_data[32]) & 0x08) != 0;
+    }
+
+    function extractBackupState(bytes memory authenticator_data) internal pure returns (bool) {
+        if (authenticator_data.length < 33) return false;
+        // Bit 4 of flags byte indicates backup state
+        return (uint8(authenticator_data[32]) & 0x10) != 0;
+    }
+
+    function getDefaultCapabilities() internal pure returns (string[] memory) {
+        string[] memory capabilities = new string[](4);
+        capabilities[0] = "sign";
+        capabilities[1] = "verify";
+        capabilities[2] = "biometric_auth";
+        capabilities[3] = "ghost_create";
+        return capabilities;
+    }
+
+    function getGhostCapabilities() internal pure returns (string[] memory) {
+        string[] memory capabilities = new string[](2);
+        capabilities[0] = "sign";
+        capabilities[1] = "verify";
+        return capabilities;
+    }
+
+    function generateIdentityId(string memory alias, uint256 timestamp) internal pure returns (string memory) {
+        return string(abi.encodePacked("passkey_", alias, "_", toString(timestamp)));
+    }
+
+    function generateRegistrationReceipt(
+        PasskeyIdentity memory identity,
+        WebAuthnCredential memory credential,
+        BiometricProof memory biometric_proof
+    ) internal {
+        // Generate cryptographic receipt for audit
+        bytes32 receipt_hash = keccak256(abi.encodePacked(
+            identity.id,
+            identity.alias,
+            identity.public_key_hash,
+            credential.credential_id,
+            biometric_proof.biometric_hash,
+            block.timestamp
+        ));
+        
+        // Store receipt (implementation depends on storage strategy)
+        // emit RegistrationReceipt(identity.alias, receipt_hash, block.timestamp);
+    }
+
+    function scheduleGhostExpiration(string memory ghost_alias, uint256 expires_at) internal {
+        // In a real implementation, this would integrate with a scheduler
+        // For now, we store the expiration time and rely on external cleanup
+        ghost_expiration[ghost_alias] = expires_at;
+    }
+
+    function hasCapability(string[] memory capabilities, string memory capability) internal pure returns (bool) {
+        for (uint i = 0; i < capabilities.length; i++) {
+            if (compareStrings(capabilities[i], capability)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function isValidAliasFormat(string memory alias) internal pure returns (bool) {
+        bytes memory aliasBytes = bytes(alias);
+        for (uint i = 0; i < aliasBytes.length; i++) {
+            bytes1 char = aliasBytes[i];
+            if (!(
+                (char >= 0x30 && char <= 0x39) || // 0-9
+                (char >= 0x41 && char <= 0x5A) || // A-Z
+                (char >= 0x61 && char <= 0x7A) || // a-z
+                char == 0x5F || char == 0x2D      // _ or -
+            )) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Administrative functions
+    function pauseRegistration() public onlyOwner {
+        registration_paused = true;
+    }
+
+    function unpauseRegistration() public onlyOwner {
+        registration_paused = false;
+    }
+
+    function revokeIdentity(string memory alias) public onlyOwner {
+        require(bytes(passkey_identities[alias].id).length > 0, "Identity not found");
+        passkey_identities[alias].status = "revoked";
+        passkey_identities[alias].updated_at = block.timestamp;
+    }
+
+    function cleanupExpiredGhosts(string[] memory ghost_aliases) public {
+        for (uint i = 0; i < ghost_aliases.length; i++) {
+            string memory alias = ghost_aliases[i];
+            if (ghost_expiration[alias] > 0 && block.timestamp >= ghost_expiration[alias]) {
+                // Mark as expired
+                passkey_identities[alias].status = "expired";
+                passkey_identities[alias].updated_at = block.timestamp;
+                
+                // Clean up mappings
+                delete credential_to_alias[passkey_identities[alias].credential_id];
+                delete ghost_expiration[alias];
+                
+                total_ghost_identities--;
+            }
+        }
+    }
+
+    // View functions
+    function getIdentity(string memory alias) public view returns (PasskeyIdentity memory) {
+        return passkey_identities[alias];
+    }
+
+    function getIdentityByCredential(string memory credential_id) public view returns (PasskeyIdentity memory) {
+        string memory alias = credential_to_alias[credential_id];
+        return passkey_identities[alias];
+    }
+
+    function isAliasAvailable(string memory alias) public view returns (bool) {
+        return bytes(passkey_identities[alias].id).length == 0;
+    }
+
+    function isCredentialRegistered(string memory credential_id) public view returns (bool) {
+        return bytes(credential_to_alias[credential_id]).length > 0;
+    }
+
+    function getTotalIdentities() public view returns (uint256, uint256) {
+        return (total_identities, total_ghost_identities);
+    }
+
+    // Utility functions for string operations
+    function compareStrings(string memory a, string memory b) internal pure returns (bool) {
+        return keccak256(abi.encodePacked(a)) == keccak256(abi.encodePacked(b));
+    }
+
+    function toString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) return "0";
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
+        }
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
+        }
+        return string(buffer);
+    }
+
+    function bytesToHex(bytes memory data) internal pure returns (string memory) {
+        bytes memory alphabet = "0123456789ABCDEF";
+        bytes memory str = new bytes(2 + data.length * 2);
+        str[0] = "0";
+        str[1] = "x";
+        for (uint i = 0; i < data.length; i++) {
+            str[2+i*2] = alphabet[uint(uint8(data[i] >> 4))];
+            str[3+i*2] = alphabet[uint(uint8(data[i] & 0x0f))];
+        }
+        return string(str);
+    }
+
+    // Placeholder for full WebAuthn verification (to be implemented)
+    function verifyWebAuthnAuthentication(
+        bytes32 public_key_hash,
+        bytes memory authenticator_data,
+        string memory client_data_json,
+        bytes memory signature
+    ) internal pure returns (bool) {
+        // Full WebAuthn verification implementation needed
+        return public_key_hash != 0 && 
+               authenticator_data.length > 0 && 
+               bytes(client_data_json).length > 0 && 
+               signature.length > 0;
+    }
+
+    function verifyPasskeyMessageSignature(
+        bytes32 public_key_hash,
+        bytes32 message_hash,
+        bytes memory signature,
+        bytes memory authenticator_data,
+        string memory client_data_json
+    ) internal pure returns (bool) {
+        // Message signature verification implementation needed
+        return public_key_hash != 0 && 
+               message_hash != 0 && 
+               signature.length > 0 &&
+               authenticator_data.length > 0 && 
+               bytes(client_data_json).length > 0;
+    }
+}

@@ -1,0 +1,16 @@
+contract webhook_listener version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.webhook_listener"; description: "Recebe webhooks externos (opcional) e os transforma em spans."; }
+
+  params: { path: "/webhook/inbound" }
+
+  on start:
+    bind http at params.path methods ["POST"];
+
+  on http "POST" as req:
+    let sig = req.headers["x-webhook-signature"] ?? "";
+    let ok = verify_hmac(sig, req.headers["x-webhook-timestamp"] ?? "", req.body ?? "");
+    assert ok, "Assinatura inválida";
+    let data = try_parse_json(req.body ?? "" ).value ?? {};
+    emit_span "webhook_in" { path: params.path, data: data, ts: now() };
+    reply 200 { status: "ok" };
+}

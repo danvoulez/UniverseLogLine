@@ -1,0 +1,20 @@
+# Template computável para identidade ghost LogLineID
+
+ghost_identity {
+  handle: "@ghost_{{uuid}}"
+  internal_id: "logline-id://ghost_{{uuid}}"
+  origin: "humano"
+  created_at: {{timestamp}}
+  status: "ghost"
+  expiration: "{{expiration}}"
+  permissions: ["view timeline", "create spans"]
+  spans: [
+    span {
+      type: "ghost_identity_created"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://ghost_{{uuid}}"
+      timestamp: {{timestamp}}
+      provenance: "ghost"
+    }
+  ]
+}

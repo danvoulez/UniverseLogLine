@@ -1,0 +1,13 @@
+module edge_connectivity_ext
+version: "1.0.0"
+
+use node_registry as reg
+use timeline_logger as tl
+
+flow optimize_routes
+  inputs: tenant_id, node_id
+  steps:
+    - let peers = select reg.Node where tenant_id=tenant_id
+    - for p in peers:
+        net.tune_tcp(node_id, p.node_id)
+    - tl.log_event(tenant_id, "network.optimized", { node_id, peers: length(peers) })

@@ -1,0 +1,14 @@
+project logline_orchestration_network
+
+modules:
+  - id_orchestration
+  - node_registry
+  - edge_connectivity
+  - resource_allocator
+  - memory_coordinator
+  - processing_distributor
+  - storage_binder
+  - ssh_authority
+  - orchestration_controller
+  - metrics_harvester
+  - compliance_guard

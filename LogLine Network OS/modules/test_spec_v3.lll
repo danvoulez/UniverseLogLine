@@ -1,0 +1,43 @@
+module test_spec_v3
+version: "1.0.0"
+use core_schema as core
+use id_orchestration as idm
+use node_registry as reg
+use resource_allocator as ra
+use processing_distributor as pd
+use magnetic_field as mf
+use enzyme_runtime as ez
+
+test "multinível + enzimas + viés magnético"
+  arrange:
+    - let t = create core.Tenant { tenant_id: "voulezvous", display_name: "VoulezVous", primary_color: "#111", active: true, created_at: now() }
+    - let id = uuid()
+    - create idm.LogLineID { id, tenant_id: t.tenant_id, passkey: "pk", device_type: mac, created_at: now() }
+
+    # Nós
+    - reg.register_node(t.tenant_id, id, { label: "macmini16-dan", hostname: "macmini", ip:"10.0.0.2", mac:"aa:bb", ram_gb:32, cores:8, disk_gb:2000, os: macos, net_score: 8, gpu_count: 1 })
+    - reg.register_node(t.tenant_id, id, { label: "llm1.local", hostname: "llm1", ip:"10.0.0.3", mac:"cc:dd", ram_gb:128, cores:32, disk_gb:8000, os: macos, net_score: 7, gpu_count: 4 })
+    - patch reg.Node set { cpu_free: 28, ram_free_mb: 110000 } where node_id="logline-id://llm1.local" and tenant_id=t.tenant_id
+    - patch reg.Node set { cpu_free: 6, ram_free_mb: 20000 } where node_id="logline-id://macmini16-dan" and tenant_id=t.tenant_id
+
+    # Campo magnético
+    - create mf.MagneticDomain { tenant_id: t.tenant_id, domain_id:"loja", origin:(0,0,0), coil_max_mT: 18, damping: 0.7 }
+    - create mf.Magnet { tenant_id: t.tenant_id, domain_id:"loja", magnet_id: uuid(), position:(2,0,0), direction:(-1,0,0), strength_mT: 10, last_set: now() }
+    - create mf.NodePlacement { tenant_id: t.tenant_id, node_id:"logline-id://macmini16-dan", domain_id:"loja", coord:(1,0,0), orientation:(0,0,1) }
+    - create mf.NodePlacement { tenant_id: t.tenant_id, node_id:"logline-id://llm1.local", domain_id:"loja", coord:(5,0,0), orientation:(0,0,1) }
+
+    # Contrato
+    - let c = create core.Contract {
+        contract_id: uuid(), tenant_id: t.tenant_id, workflow: "llm_folding", priority: high,
+        requirements: { cpu_cores: 4, ram_gb: 8, gpu: { count: 1, mig_profile: "1g.10gb" } },
+        created_at: now(), ttl: "10m", state: queued
+      }
+
+  act:
+    - ez.run_enzymes_for_event("contract.queued", c)
+    - let node = ra.pick_node_for_contract(t.tenant_id, c)
+    - pd.dispatch_task(t.tenant_id, c)
+
+  assert:
+    - expect node.node_id in ["logline-id://llm1.local", "logline-id://macmini16-dan"]
+    - expect exists processing_distributor.CpuSpan where contract_id=c.contract_id and status=="running"

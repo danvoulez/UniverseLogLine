@@ -1,0 +1,27 @@
+module orchestration_controller
+version: "1.4.0"
+use core_schema as core
+use resource_allocator as ra
+use processing_distributor as pd
+use timeline_logger as tl
+
+flow run_orchestration_cycle
+  frequency: every 10s
+  inputs: tenant_id
+  steps:
+    - let pending = select core.Contract where tenant_id=tenant_id and state == queued order by priority desc, created_at asc limit 100
+    - for c in pending:
+        try:
+          let node = ra.pick_node_for_contract(tenant_id, c)
+          pd.dispatch_task(tenant_id, c)
+          transition core.Contract(c).state start()
+        catch e:
+          tl.log_event(tenant_id, "orchestrator.error", {contract: c.contract_id, error: e})
+
+policy hedging_for_urgent
+  when core.Contract.priority == urgent and state == queued
+  action set hedging_ms = 3000
+
+policy backoff_failures
+  on failure in pd.dispatch_task
+  action reschedule in "5s" with jitter "2s"

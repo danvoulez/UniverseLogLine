@@ -1,0 +1,61 @@
+module policy_primitives
+version: "1.0.0"
+
+# Criptografia em repouso
+flow encryption_enforce_at_rest
+  inputs: node_id, algorithm
+  steps:
+    - storage.enable_encryption(node_id, algorithm)
+
+# Auditoria
+flow audit_enable_full_logging
+  inputs: node_id
+  steps:
+    - audit.enable(node_id, "full")
+
+# Privacidade (GDPR etc.)
+flow privacy_enable_right_to_deletion
+  inputs: node_id
+  steps:
+    - privacy.enable_erasure(node_id)
+
+flow consent_require_explicit
+  inputs: node_id
+  steps:
+    - privacy.require_opt_in(node_id)
+
+# Geo
+flow geo_detect
+  inputs: geo_hint
+  outputs: string
+  steps:
+    - if geo_hint in ["PT","ES","FR","DE","EU"]: return "EU"
+    - if geo_hint == "US-CA": return "US-CA"
+    - if geo_hint == "CA": return "CA"
+    - return "BASELINE"
+
+# Wrappers específicos por regime
+flow apply_gdpr
+  inputs: tenant_id, node_id
+  steps:
+    - encryption_enforce_at_rest(node_id, "AES-256")
+    - audit_enable_full_logging(node_id)
+    - privacy_enable_right_to_deletion(node_id)
+    - consent_require_explicit(node_id)
+
+flow apply_pipeda
+  inputs: tenant_id, node_id
+  steps:
+    - encryption_enforce_at_rest(node_id, "AES-256")
+    - audit_enable_full_logging(node_id)
+
+flow apply_ccpa
+  inputs: tenant_id, node_id
+  steps:
+    - encryption_enforce_at_rest(node_id, "AES-256")
+    - audit_enable_full_logging(node_id)
+
+flow apply_baseline
+  inputs: tenant_id, node_id
+  steps:
+    - audit_enable_full_logging(node_id)

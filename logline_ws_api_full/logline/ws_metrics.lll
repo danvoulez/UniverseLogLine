@@ -1,0 +1,7 @@
+contract ws_metrics version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.metrics"; description: "Coleta de métricas básicas (conexões, mensagens, erros)."}
+
+  on call with { kind, ok, size, detail }:
+    emit_span "ws_metric" { kind: kind ?? "unknown", ok: ok ?? null, size: size ?? null, detail: detail ?? null, ts: now() };
+    return { ok: true };
+}

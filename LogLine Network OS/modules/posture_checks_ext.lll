@@ -1,0 +1,19 @@
+module posture_checks_ext
+version: "1.0.0"
+
+use timeline_logger as tl
+
+flow apply_hardening
+  inputs: tenant_id, node_id
+  steps:
+    - sec.require_filevault_or_luks(node_id)
+    - sec.enforce_firewall(node_id)
+    - sec.ssh_disable_password_login(node_id)
+    - sec.ssh_min_key_bits(node_id, 256)
+    - tl.log_event(tenant_id, "posture.hardened", { node_id })
+
+flow verify_compliance
+  inputs: tenant_id, node_id, region
+  steps:
+    - let ok = sec.attestation(node_id) and sec.firewall_on() and sec.disk_encryption_enabled()
+    - tl.log_event(tenant_id, "posture.verify", { node_id, region, ok })

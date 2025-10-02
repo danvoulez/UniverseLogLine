@@ -1,0 +1,453 @@
+/// # Grammar Minicontratos - Gramática Local para Minicontratos
+///
+/// Gramática específica para o projeto Minicontratos.
+/// Define entidades, regras de enforcement, modelo de tempo
+/// e workflows específicos para contratos simples.
+///
+/// Esta gramática estende grammar_core e adiciona:
+/// - Entidades: contrato, proposta, recibo
+/// - Tempo: dias úteis com calendário brasileiro
+/// - Enforcement: regras de vencimento e assinatura
+/// - Workflows: rascunho -> assinado -> executado -> quitado
+
+grammar_minicontratos {
+    name: "minicontratos",
+    version: "1.2.0",
+    extends: "grammar_core@1.0.0",
+    hash: "sha256:minicontratos_v1_2_0_hash_placeholder",
+    created_at: "2025-09-27T15:00:00Z",
+    author: "minicontratos_project",
+    
+    /// Modelo de tempo específico: dias úteis brasileiros
+    time_model: {
+        name: "dias_uteis_brasil",
+        unit: "business_days",
+        
+        business_calendar: {
+            /// Feriados nacionais brasileiros
+            holidays: [
+                "2025-01-01", // Confraternização Universal
+                "2025-04-18", // Sexta-feira Santa
+                "2025-04-21", // Tiradentes
+                "2025-05-01", // Dia do Trabalhador
+                "2025-09-07", // Independência do Brasil
+                "2025-10-12", // Nossa Senhora Aparecida
+                "2025-11-02", // Finados
+                "2025-11-15", // Proclamação da República
+                "2025-12-25", // Natal
+            ],
+            
+            /// Dias úteis: segunda a sexta
+            work_days: [1, 2, 3, 4, 5],
+            
+            /// Horário comercial: 9h às 18h
+            work_hours: [9, 18],
+        },
+        
+        /// Fórmulas de cálculo temporal específicas
+        calculation_rules: [
+            {
+                name: "vencimento",
+                formula: "data_criacao + prazo_dias_uteis",
+                description: "Calcula vencimento somando dias úteis à data de criação"
+            },
+            {
+                name: "dias_atraso",
+                formula: "max(0, data_atual - vencimento)",
+                description: "Calcula quantos dias úteis está em atraso"
+            },
+            {
+                name: "prazo_restante",
+                formula: "max(0, vencimento - data_atual)",
+                description: "Calcula quantos dias úteis restam até vencimento"
+            },
+            {
+                name: "idade_contrato",
+                formula: "data_atual - data_criacao",
+                description: "Calcula idade do contrato em dias úteis"
+            }
+        ]
+    },
+    
+    /// Regras de enforcement específicas para minicontratos
+    enforcement: {
+        rules: [
+            {
+                rule_id: "valor_positivo",
+                rule_type: "field_validation",
+                expression: "valor > 0",
+                priority: 100,
+                scope: "project",
+                description: "Valor do contrato deve ser positivo",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "prazo_maximo",
+                rule_type: "business_rule",
+                expression: "prazo_dias <= 365",
+                priority: 90,
+                scope: "project",
+                description: "Prazo máximo de 1 ano (365 dias úteis)",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "responsavel_obrigatorio",
+                rule_type: "field_validation",
+                expression: "responsavel != null && responsavel.length > 0",
+                priority: 95,
+                scope: "project",
+                description: "Responsável é obrigatório",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "data_vencimento_futura",
+                rule_type: "business_rule",
+                expression: "vencimento > data_criacao",
+                priority: 85,
+                scope: "project",
+                description: "Data de vencimento deve ser futura",
+                violation_action: "reject_transaction"
+            },
+            {
+                rule_id: "descricao_minima",
+                rule_type: "field_validation",
+                expression: "descricao.length >= 10",
+                priority: 50,
+                scope: "project",
+                description: "Descrição deve ter pelo menos 10 caracteres",
+                violation_action: "warn_and_continue"
+            },
+            {
+                rule_id: "assinatura_para_execucao",
+                rule_type: "workflow_transition",
+                expression: "status == 'assinado' before transition to 'executado'",
+                priority: 200,
+                scope: "project",
+                description: "Só pode executar contrato se estiver assinado",
+                violation_action: "reject_transaction"
+            }
+        ],
+        
+        /// Triggers automáticos
+        triggers: [
+            {
+                trigger_id: "auto_vencimento",
+                condition: "data_atual >= vencimento && status != 'quitado'",
+                action: "mudar_status('vencido')",
+                automatic: true,
+                description: "Marca como vencido quando passa o prazo"
+            },
+            {
+                trigger_id: "notificar_vencimento_proximo",
+                condition: "prazo_restante <= 3 && status == 'executado'",
+                action: "criar_notificacao('vencimento_proximo')",
+                automatic: true,
+                description: "Notifica quando restam 3 dias úteis para vencer"
+            },
+            {
+                trigger_id: "auto_calcular_vencimento",
+                condition: "on_create || on_update(prazo_dias)",
+                action: "set vencimento = data_criacao + prazo_dias_uteis",
+                automatic: true,
+                description: "Calcula vencimento automaticamente"
+            },
+            {
+                trigger_id: "validar_alteracao_executado",
+                condition: "status == 'executado' && on_update(valor)",
+                action: "require_witness('financial_officer')",
+                automatic: true,
+                description: "Exige testemunha para alterar valor de contrato executado"
+            }
+        ],
+        
+        /// Requisitos de testemunha
+        witness_requirements: {
+            "financial_changes": {
+                required_roles: ["financial_officer", "admin"],
+                minimum_signatures: 1,
+                timeout_hours: 24
+            },
+            "status_transitions": {
+                required_roles: ["contract_manager", "admin"],
+                minimum_signatures: 1,
+                timeout_hours: 48
+            },
+            "urgent_changes": {
+                required_roles: ["admin"],
+                minimum_signatures: 2,
+                timeout_hours: 4
+            }
+        }
+    },
+    
+    /// Entidades específicas do domínio
+    domain_entities: {
+        /// Entidade principal: contrato
+        contrato: {
+            description: "Contrato simples entre partes",
+            required_fields: {
+                id: "logline_id",
+                titulo: "string",
+                descricao: "string",
+                valor: "number",
+                moeda: "string",
+                responsavel: "string",
+                data_criacao: "timestamp",
+                prazo_dias: "integer",
+                vencimento: "timestamp",
+                status: "string"
+            },
+            optional_fields: {
+                contraparte: "string",
+                categoria: "string",
+                tags: "array",
+                anexos: "array",
+                observacoes: "string",
+                data_assinatura: "timestamp",
+                data_execucao: "timestamp",
+                data_quitacao: "timestamp",
+                assinatura_digital: "string"
+            },
+            immutable_fields: ["id", "data_criacao"],
+            field_constraints: {
+                valor: ["valor > 0", "valor < 1000000"], // Máximo 1 milhão
+                moeda: ["moeda in ['BRL', 'USD', 'EUR']"],
+                prazo_dias: ["prazo_dias > 0", "prazo_dias <= 365"],
+                status: ["status in ['rascunho', 'assinado', 'executado', 'quitado', 'vencido', 'cancelado']"],
+                titulo: ["titulo.length >= 5", "titulo.length <= 100"],
+                descricao: ["descricao.length >= 10", "descricao.length <= 1000"]
+            }
+        },
+        
+        /// Entidade para propostas
+        proposta: {
+            description: "Proposta de contrato antes da formalização",
+            required_fields: {
+                id: "logline_id",
+                titulo: "string",
+                valor_proposto: "number",
+                proponente: "string",
+                data_proposta: "timestamp",
+                validade_dias: "integer"
+            },
+            optional_fields: {
+                descricao: "string",
+                condicoes: "string",
+                anexos: "array",
+                resposta: "string",
+                data_resposta: "timestamp"
+            },
+            immutable_fields: ["id", "data_proposta", "proponente"],
+            field_constraints: {
+                valor_proposto: ["valor_proposto > 0"],
+                validade_dias: ["validade_dias > 0", "validade_dias <= 90"],
+                titulo: ["titulo.length >= 5", "titulo.length <= 100"]
+            }
+        },
+        
+        /// Entidade para recibos
+        recibo: {
+            description: "Recibo de pagamento ou execução",
+            required_fields: {
+                id: "logline_id",
+                contrato_id: "logline_id",
+                valor_pago: "number",
+                data_pagamento: "timestamp",
+                forma_pagamento: "string",
+                recebedor: "string"
+            },
+            optional_fields: {
+                descricao: "string",
+                numero_documento: "string",
+                comprovante: "string",
+                observacoes: "string"
+            },
+            immutable_fields: ["id", "contrato_id", "data_pagamento"],
+            field_constraints: {
+                valor_pago: ["valor_pago > 0"],
+                forma_pagamento: ["forma_pagamento in ['dinheiro', 'pix', 'transferencia', 'cheque', 'cartao']"]
+            }
+        }
+    },
+    
+    /// Workflows específicos
+    workflows: {
+        /// Workflow principal do contrato
+        contrato_lifecycle: {
+            description: "Ciclo de vida completo de um contrato",
+            initial_state: "rascunho",
+            
+            states: {
+                rascunho: {
+                    description: "Contrato em elaboração",
+                    auto_transitions: ["auto_calcular_vencimento"]
+                },
+                assinado: {
+                    description: "Contrato assinado pelas partes",
+                    auto_transitions: []
+                },
+                executado: {
+                    description: "Contrato em execução",
+                    auto_transitions: ["auto_vencimento", "notificar_vencimento_proximo"]
+                },
+                quitado: {
+                    description: "Contrato quitado/finalizado",
+                    auto_transitions: []
+                },
+                vencido: {
+                    description: "Contrato vencido (não quitado no prazo)",
+                    auto_transitions: []
+                },
+                cancelado: {
+                    description: "Contrato cancelado",
+                    auto_transitions: []
+                }
+            },
+            
+            transitions: [
+                {
+                    from_state: "rascunho",
+                    to_state: "assinado",
+                    condition: "all_required_fields_present && assinatura_digital != null",
+                    required_roles: ["contract_manager", "admin"]
+                },
+                {
+                    from_state: "assinado",
+                    to_state: "executado",
+                    condition: "data_atual >= data_assinatura",
+                    required_roles: ["contract_manager", "admin"]
+                },
+                {
+                    from_state: "executado",
+                    to_state: "quitado",
+                    condition: "exists(recibo) && recibo.valor_pago >= contrato.valor",
+                    required_roles: ["financial_officer", "admin"]
+                },
+                {
+                    from_state: "executado",
+                    to_state: "vencido",
+                    condition: "data_atual > vencimento && status != 'quitado'",
+                    required_roles: [], // Transição automática
+                    automatic: true
+                },
+                {
+                    from_state: "rascunho",
+                    to_state: "cancelado",
+                    condition: "cancelamento_justificado",
+                    required_roles: ["contract_manager", "admin"]
+                },
+                {
+                    from_state: "assinado",
+                    to_state: "cancelado",
+                    condition: "acordo_mutuo || breach_of_contract",
+                    required_roles: ["admin"]
+                }
+            ]
+        },
+        
+        /// Workflow da proposta
+        proposta_workflow: {
+            description: "Fluxo de aprovação de propostas",
+            initial_state: "nova",
+            
+            states: {
+                nova: {
+                    description: "Proposta recém-criada",
+                    auto_transitions: []
+                },
+                em_analise: {
+                    description: "Proposta sendo analisada",
+                    auto_transitions: []
+                },
+                aprovada: {
+                    description: "Proposta aprovada",
+                    auto_transitions: []
+                },
+                rejeitada: {
+                    description: "Proposta rejeitada",
+                    auto_transitions: []
+                },
+                expirada: {
+                    description: "Proposta expirou sem resposta",
+                    auto_transitions: []
+                }
+            },
+            
+            transitions: [
+                {
+                    from_state: "nova",
+                    to_state: "em_analise",
+                    condition: "assigned_analyst != null",
+                    required_roles: ["analyst", "admin"]
+                },
+                {
+                    from_state: "em_analise",
+                    to_state: "aprovada",
+                    condition: "approval_decision == 'approve'",
+                    required_roles: ["analyst", "admin"]
+                },
+                {
+                    from_state: "em_analise",
+                    to_state: "rejeitada",
+                    condition: "approval_decision == 'reject'",
+                    required_roles: ["analyst", "admin"]
+                },
+                {
+                    from_state: "nova",
+                    to_state: "expirada",
+                    condition: "data_atual > (data_proposta + validade_dias)",
+                    required_roles: [], // Automático
+                    automatic: true
+                }
+            ]
+        }
+    },
+    
+    /// Configurações específicas do projeto
+    project_config: {
+        /// Moedas suportadas
+        supported_currencies: ["BRL", "USD", "EUR"],
+        
+        /// Limites de valor
+        min_contract_value: 0.01,
+        max_contract_value: 1000000.00,
+        
+        /// Configurações de notificação
+        notification_settings: {
+            vencimento_proximo_dias: 3,
+            lembrete_assinatura_dias: 7,
+            escalacao_vencido_dias: 5
+        },
+        
+        /// Configurações de auditoria
+        audit_settings: {
+            log_all_changes: true,
+            require_justification_for: ["valor", "vencimento", "status"],
+            retention_period_days: 2555 // 7 anos
+        }
+    },
+    
+    /// Integração com outros sistemas
+    integrations: {
+        /// Sistema de pagamentos
+        payment_gateway: {
+            provider: "pix_brasil",
+            webhook_url: "/webhooks/payments",
+            auto_create_receipt: true
+        },
+        
+        /// Sistema de documentos
+        document_storage: {
+            provider: "logline_storage",
+            auto_backup: true,
+            encryption: "aes256"
+        },
+        
+        /// Sistema de notificações
+        notification_system: {
+            provider: "logline_notifications",
+            channels: ["email", "sms", "push"],
+            templates_path: "/templates/minicontratos"
+        }
+    }
+}

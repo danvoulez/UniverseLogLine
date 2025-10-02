@@ -1,0 +1,17 @@
+# Transição computável via assinatura de contrato
+
+contract_transition {
+  handle: "{{handle}}"
+  internal_id: "logline-id://{{handle}}"
+  previous_status: "validado"
+  new_status: "institucional"
+  transition_at: {{timestamp}}
+  condition: "contrato_assinado"
+  span: {
+    type: "identity_transitioned"
+    span_id: "{{uuid}}"
+    provenance: "transition"
+    agent: "logline-id://{{handle}}"
+    timestamp: {{timestamp}}
+  }
+}

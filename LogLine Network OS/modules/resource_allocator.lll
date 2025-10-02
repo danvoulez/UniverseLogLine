@@ -1,0 +1,49 @@
+module resource_allocator
+version: "2.1.0"
+use core_schema as core
+use node_registry as reg
+use quota_policies as qp
+use magnetic_field as mag
+use enzyme_runtime as ez
+
+flow pick_node_for_contract
+  inputs: tenant_id, contract (core.Contract)
+  outputs: reg.Node
+  steps:
+    - qp.enforce_quota(tenant_id, contract.requirements)
+    - let candidates = select reg.Node where tenant_id=tenant_id
+    - filter candidates by n.cpu_cores >= contract.requirements.cpu_cores
+                          and n.ram_free_mb >= contract.requirements.ram_gb*1024
+                          and (contract.requirements.gpu.count or 0) <= n.gpu_free
+    - emit event "allocate.candidates" with { tenant_id, contract_id: contract.contract_id, candidate_nodes: candidates }
+    - ez.run_enzymes_for_event("allocate.candidates", { tenant_id, contract_id: contract.contract_id, candidate_nodes: candidates })
+    - let bias = mag.compute_bias(tenant_id, candidates, contract.contract_id)
+    - for b in bias:
+        let c = find candidates where node_id==b.node_id
+        set c.network_score = max(1, c.network_score - b.bias_delta)
+    - sort candidates by (network_score asc, ram_free_mb desc, gpu_free desc)
+    - require not empty(candidates) else raise "no_node_available"
+    - return first(candidates)
+
+flow reserve_resources
+  inputs: tenant_id, node_id, req, ttl
+  outputs: reservation_id (uuid)
+  steps:
+    - patch reg.Node where node_id=node_id and tenant_id=tenant_id set {
+        cpu_free = max(0, cpu_free - req.cpu_cores),
+        ram_free_mb = max(0, ram_free_mb - req.ram_gb*1024),
+        gpu_free = max(0, gpu_free - (req.gpu.count or 0))
+      }
+    - create reservation { reservation_id: uuid(), tenant_id, node_id, req, ttl, created_at: now() }
+    - return reservation_id
+
+policy reservation_gc
+  frequency: every 5s
+  action:
+    - for each reservation where now() - created_at > ttl:
+        patch reg.Node set {
+          cpu_free = cpu_free + reservation.req.cpu_cores,
+          ram_free_mb = ram_free_mb + reservation.req.ram_gb*1024,
+          gpu_free = gpu_free + (reservation.req.gpu.count or 0)
+        }
+        delete reservation

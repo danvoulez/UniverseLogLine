@@ -1,0 +1,23 @@
+module attestation_hub
+version: "1.0.0"
+
+entity Attestation
+  key: quote_id (uuid)
+  properties:
+    - tenant_id: string
+    - node_id: string
+    - quote_id: uuid
+    - tpm_quote: bytes
+    - nonce: bytes
+    - verified: bool
+    - ts: datetime
+
+flow remote_attest
+  inputs: tenant_id, node_id
+  outputs: Attestation
+  steps:
+    - let nonce = random_bytes(32)
+    - let quote = tpm_quote(node_id, nonce)
+    - let ok = verify_quote(quote, nonce)
+    - create Attestation { tenant_id, node_id, quote_id: uuid(), tpm_quote: quote, nonce, verified: ok, ts: now() }
+    - require ok else raise "attestation_failed"

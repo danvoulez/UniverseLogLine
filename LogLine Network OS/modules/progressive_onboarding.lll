@@ -1,0 +1,55 @@
+module progressive_onboarding
+version: "1.0.1"
+
+use onboarding_plugplay as ob
+use posture_checks_ext as posture
+use enzyme_runtime_ext as ez
+use edge_connectivity_ext as edge
+
+entity OnboardingProgress
+  key: node_id (string)
+  properties:
+    - node_id: string
+    - stage: enum [discovered, registered, connected, secured, optimized]
+    - completed_steps: list[string]
+    - next_steps: list[string]
+    - score: float
+    - created_at: datetime
+    - updated_at: datetime
+
+flow progressive_enhance
+  inputs: tenant_id, node_id
+  outputs: { enhanced: bool, score: float }
+  steps:
+    - let prog = select OnboardingProgress where node_id=node_id
+    - if prog is null:
+        create OnboardingProgress { node_id, stage: discovered, completed_steps: [], next_steps: ["register","connect"], score: 0.1, created_at: now(), updated_at: now() }
+        set prog = last_insert
+
+    # 1) Registro leve
+    - if not contains(prog.completed_steps, "register"):
+        try:
+          ob.quickstart_node_mac(tenant_id, "", { lightweight: true })
+          append prog.completed_steps += "register"
+          update prog set stage=registered, score=0.3, updated_at: now()
+        catch _: pass
+
+    # 2) Otimização de rede
+    - if not contains(prog.completed_steps, "optimize_network"):
+        edge.optimize_routes(tenant_id, node_id)
+        append prog.completed_steps += "optimize_network"
+        update prog set score=0.5, updated_at: now()
+
+    # 3) Hardening (assíncrono)
+    - spawn async:
+        posture.apply_hardening(tenant_id, node_id)
+        append prog.completed_steps += "security"
+        update prog set stage=secured, score=0.7, updated_at: now()
+
+    # 4) Enzimas (assíncrono)
+    - spawn async:
+        ez.optimize_for_workload(tenant_id, node_id)
+        append prog.completed_steps += "enzymes"
+        update prog set stage=optimized, score=1.0, updated_at: now()
+
+    - return { enhanced: prog.score >= 0.7, score: prog.score }

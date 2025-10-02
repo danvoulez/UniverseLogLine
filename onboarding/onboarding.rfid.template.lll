@@ -1,0 +1,21 @@
+# LogLineID Onboarding Template - RFID
+
+identity {
+  handle: "@rafa_rfid"
+  internal_id: "logline-id://rafa_rfid"
+  origin: "humano"
+  created_at: {{timestamp}}
+  status: "validado"
+  auth_methods: ["rfid"]
+  rfid_tag: "{{rfid_serial}}"
+  spans: [
+    span {
+      type: "rfid_onboarding"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://rafa_rfid"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+    }
+  ]
+  permissions: ["view timeline", "create spans", "assinar contratos"]
+}

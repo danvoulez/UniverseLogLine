@@ -1,0 +1,22 @@
+module posture_checks
+version: "1.0.0"
+
+use timeline_logger as tl
+
+flow minimal_security
+  inputs: tenant_id, node_id
+  steps:
+    - require sys.os_version_at_least(13, 5) else raise "os_outdated"
+    - require sec.disk_encryption_enabled() else raise "disk_not_encrypted"
+    - require sec.firewall_on() else raise "firewall_off"
+    - tl.log_event(tenant_id, "posture.minimal.ok", { node_id })
+
+flow deep_posture_scan
+  inputs: tenant_id, node_id
+  outputs: list[string]
+  steps:
+    - let issues = []
+    - if not sec.disk_encryption_enabled(): append issues += "encryption"
+    - if not sec.firewall_on(): append issues += "firewall"
+    - if not sec.ssh_pubkey_length_ok(40): append issues += "ssh_key_short"
+    - return issues

@@ -1,0 +1,37 @@
+module infrastructure_as_code
+version: "1.0.0"
+
+use core_schema as core
+use resource_allocator as ra
+use ssh_authority as ssh
+use installer_bootstrap as boot
+use timeline_logger as tl
+
+enum DeployStrategy [rolling, blue_green, canary]
+
+entity InfraBlueprint
+  key: blueprint_id (uuid)
+  properties:
+    - tenant_id: string
+    - blueprint_id: uuid
+    - owner: string
+    - nodes_required: int
+    - resource_specs: json    # {cpu_cores, ram_gb, disk_gb}
+    - deployment_strategy: DeployStrategy = rolling
+    - created_at: core.datetime
+
+flow provision_infrastructure
+  inputs: tenant_id, bp (InfraBlueprint)
+  outputs: deployed_resources
+  steps:
+    - validate_blueprint(bp) -> ok
+    - require ok
+    - let chosen = []
+    - for i in 1..bp.nodes_required:
+        let node = ra.pick_node_for_contract(tenant_id, { contract_id: uuid(), workflow:"provision", requirements: bp.resource_specs, created_at: now(), ttl:"5m", state: queued })
+        append chosen += node
+        ssh.authorize_ssh(tenant_id, node.logline_ref.id, node.node_id)
+        boot.install_launch_agent(node.node_id)
+    - apply_strategy(bp.deployment_strategy, chosen)
+    - tl.log_event(tenant_id, "iac.provisioned", { blueprint: bp.blueprint_id, nodes: map(chosen, _.node_id) })
+    - return { nodes: chosen }

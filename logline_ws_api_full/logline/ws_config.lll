@@ -1,0 +1,37 @@
+contract ws_config version "1.0.0" {
+  meta: {
+    id: "vv.api.ws_webhook.config";
+    description: "Configuração computável da API WebSocket/Webhook, com validações e defaults.";
+  }
+
+  on call with { scope }:
+    let env = getenv();
+    let cfg = {
+      ws: {
+        host: env.WS_HOST ?? "0.0.0.0",
+        port: to_int(env.WS_PORT ?? "8765"),
+        max_message_bytes: to_int(env.WS_MAX_BYTES ?? "1048576"),
+        heartbeat_secs: to_int(env.WS_HEARTBEAT_SECS ?? "20"),
+        allowed_origins: split(env.WS_ALLOWED_ORIGENS ?? env.WS_ALLOWED_ORIGINS ?? "https://voulezvous.tv,https://logline.world", ","),
+      },
+      auth: {
+        mode: env.AUTH_MODE ?? "logline_id",
+        jwk_set_url: env.AUTH_JWKS_URL ?? "",
+        hmac_secret: env.AUTH_HMAC_SECRET ?? "",
+        token_ttl_secs: to_int(env.AUTH_TOKEN_TTL_SECS ?? "3600")
+      },
+      webhook: {
+        default_target: env.WEBHOOK_DEFAULT_TARGET ?? "",
+        hmac_secret: env.WEBHOOK_HMAC_SECRET ?? "",
+        connect_timeout_ms: to_int(env.WEBHOOK_CONNECT_TIMEOUT_MS ?? "2000"),
+        read_timeout_ms: to_int(env.WEBHOOK_READ_TIMEOUT_MS ?? "4000"),
+        retry_backoff_ms: [500, 2000, 5000, 15000]
+      }
+    };
+
+    assert cfg.ws.port >= 1024 && cfg.ws.port <= 65535, "WS_PORT fora do intervalo permitido";
+    assert cfg.ws.max_message_bytes <= 4_194_304, "WS_MAX_BYTES acima do limite (4MB)";
+    assert cfg.auth.mode in ["logline_id","jwt","hmac"], "AUTH_MODE inválido";
+
+    return cfg;
+}

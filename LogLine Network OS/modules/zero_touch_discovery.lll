@@ -1,0 +1,43 @@
+module zero_touch_discovery
+version: "1.0.1"
+
+use onboarding_plugplay as ob
+use device_probe as probe
+
+entity DiscoveryBeacon
+  key: beacon_id (string)
+  properties:
+    - beacon_id: string
+    - tenant_id: string
+    - service_type: string        # "_logline._tcp"
+    - txt_records: map[string, string]
+    - expires_at: datetime
+
+flow broadcast_discovery
+  inputs: tenant_id, invitation_token
+  outputs: { beacon_id: string }
+  steps:
+    - let beacon = uuid()
+    - mdns.register_service("_logline._tcp.local", {
+        name: "LogLine-Onboarding-" + tenant_id,
+        port: 8443,
+        txt: { tenant: tenant_id, token: invitation_token, version: "3.1.1", auth: "passkey+sso" }
+      })
+    - create DiscoveryBeacon { 
+        beacon_id: beacon, tenant_id, service_type: "_logline._tcp",
+        txt_records: { token: invitation_token }, expires_at: now() + "15m"
+      }
+    - return { beacon_id: beacon }
+
+flow scan_and_join
+  outputs: { node_id: string }
+  steps:
+    - let services = mdns.browse("_logline._tcp.local", timeout: "5s")
+    - if length(services) == 0:
+        return { node_id: ob.quickstart_node_mac(prompt("Tenant:"), prompt("Token:"), { hint:"manual" }).node_id }
+    - let svc = services[0]
+    - let hw = probe.collect_hardware()
+    - let res = http.post("https://" + svc.host + ":" + svc.port + "/quickstart", {
+        tenant_id: svc.txt.tenant, token: svc.txt.token, hardware: hw
+      })
+    - return { node_id: res.node_id }

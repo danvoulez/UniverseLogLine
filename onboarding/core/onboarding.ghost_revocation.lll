@@ -1,0 +1,15 @@
+# Revogação computável de identidade ghost
+
+ghost_revocation {
+  handle: "@ghost_394x"
+  internal_id: "logline-id://ghost-394x"
+  revoked_at: {{timestamp}}
+  reason: "expiração automática"
+  span: {
+    type: "deleted"
+    span_id: "{{uuid}}"
+    provenance: "revocation"
+    agent: "logline-id://ghost-394x"
+    timestamp: {{timestamp}}
+  }
+}

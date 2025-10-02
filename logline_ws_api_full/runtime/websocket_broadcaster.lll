@@ -1,0 +1,10 @@
+contract websocket_broadcaster version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.ws_broadcast"; description: "Broadcast de mensagens JSON para sessões WebSocket ativas." }
+
+  on call with { message }:
+    // Em produção, obter sessões reais de um registry. Aqui: broadcast genérico.
+    let payload = type_of(message) == "string" ? message : to_json(message);
+    broadcast payload;
+    emit_span "ws_broadcast" { size: sizeof(payload), ts: now() };
+    return { ok: true };
+}

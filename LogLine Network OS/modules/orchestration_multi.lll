@@ -1,0 +1,42 @@
+module orchestration_multi
+version: "1.0.0"
+use core_schema as core
+use resource_allocator as ra
+use processing_distributor as pd
+use enzyme_runtime as ez
+use timeline_logger as tl
+use sla_manager as sla
+
+# Supervisão Global (cadência baixa, visão ampla)
+flow global_cycle
+  frequency: every 30s
+  inputs: tenant_id
+  steps:
+    - let backlog = count(core.Contract where tenant_id=tenant_id and state==queued)
+    - if backlog > 0: emit event "orchestrator.global.backlog" with {tenant_id, backlog}
+    - ez.run_enzymes_for_event("orchestrator.global.backlog", {tenant_id, backlog})
+
+# Planejamento Regional (latência média)
+flow regional_cycle
+  frequency: every 10s
+  inputs: tenant_id, region_id
+  steps:
+    - let pending = select core.Contract where tenant_id=tenant_id and state==queued order by priority desc, created_at asc limit 200
+    - for c in pending:
+        try:
+          pd.dispatch_task(tenant_id, c)
+          transition core.Contract(c).state start()
+        catch e:
+          tl.log_event(tenant_id, "orchestrator.regional.error", {contract: c.contract_id, error: e})
+
+# Execução de Borda (cadência alta)
+flow edge_cycle
+  frequency: every 2s
+  inputs: tenant_id
+  steps:
+    - let p = select core.Contract where tenant_id=tenant_id and state==queued and priority in [urgent, high] order by created_at asc limit 20
+    - for c in p:
+        try:
+          pd.dispatch_task(tenant_id, c)
+          transition core.Contract(c).state start()
+        catch _: continue

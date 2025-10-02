@@ -1,0 +1,29 @@
+# LogLineID Onboarding Template - Embedding Facial
+
+identity {
+  handle: "@danvoulez"
+  internal_id: "logline-id://danvoulez"
+  origin: "humano"
+  created_at: {{timestamp}}
+  status: "validado"
+  auth_methods: ["biometria_facial"]
+  biometria_facial: {
+    embedding: "{{face_embedding_vector}}"
+    last_verified: {{timestamp}}
+    score: "{{similarity_score}}"
+  }
+  spans: [
+    span {
+      type: "face_onboarding"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://danvoulez"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+      verification: {
+        method: "biometria_facial"
+        score: "{{similarity_score}}"
+      }
+    }
+  ]
+  permissions: ["view timeline", "create spans", "assinar contratos"]
+}

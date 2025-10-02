@@ -1,0 +1,36 @@
+module zero_knowledge_auth
+version: "1.0.0"
+
+use core_schema as core
+use core_ext as ext
+use id_orchestration as idm
+use secrets_vault as vault
+
+entity ZKProof
+  key: proof_id (uuid)
+  properties:
+    - tenant_id: string
+    - prover: idm.LogLineID
+    - challenge: ext.nonce
+    - response: bytes
+    - verified: bool
+    - context: string
+    - ts: core.datetime
+
+flow zk_authenticate
+  inputs: tenant_id, prover (idm.LogLineID), target_resource
+  outputs: token
+  steps:
+    - let ch = random_bytes(32)
+    - let rsp = compute_proof(prover, ch, target_resource)
+    - let ok = verify_without_revealing(prover, ch, rsp)
+    - create ZKProof { tenant_id, proof_id: uuid(), prover, challenge: ch, response: rsp, verified: ok, context: target_resource, ts: now() }
+    - require ok else raise "zk_failed"
+    - return capability_token(prover, target_resource, ttl="15m")
+
+flow preflight_group_auth
+  inputs: tenant_id, ids (list[idm.LogLineID])
+  outputs: bool
+  steps:
+    - for i in ids: require zk_authenticate(tenant_id, i, "consensus.validator") not null
+    - return true

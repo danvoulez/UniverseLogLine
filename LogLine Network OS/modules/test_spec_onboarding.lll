@@ -1,0 +1,16 @@
+module test_spec_onboarding
+version: "1.0.0"
+
+use onboarding_plugplay as ob
+use core_schema as core
+use node_registry as reg
+
+test "onboarding plug-and-play mac end-to-end"
+  arrange:
+    - let kit = ob.issue_onboarding_kit("VoulezVous", "#111")
+  act:
+    - let res = ob.quickstart_node_mac(kit.tenant_id, kit.onboarding_token, { domain: "default" })
+    - let ok = ob.post_install_check(kit.tenant_id, res.node_id)
+  assert:
+    - expect exists reg.Node where tenant_id=kit.tenant_id and node_id=res.node_id
+    - expect ok.ok == true

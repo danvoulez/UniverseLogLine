@@ -1,0 +1,20 @@
+project logline_onboarding_v31
+version: "3.1.0"
+
+meta:
+  author: "LogLineOS"
+  description: "Onboarding plug-and-play: token/QR, auto-provisionamento de nós macOS/iOS/Linux, políticas default, postura e rollback."
+
+requires:
+  - logline_orchestration_network_v3  # bundle anterior
+
+modules:
+  - onboarding_plugplay
+  - device_probe
+  - token_minter
+  - qr_issuer
+  - installer_bootstrap
+  - posture_checks
+  - tenant_seeding
+  - rollback_recovery
+  - test_spec_onboarding

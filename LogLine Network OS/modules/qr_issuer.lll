@@ -1,0 +1,13 @@
+module qr_issuer
+version: "1.0.0"
+
+flow issue_qr
+  inputs: payload
+  outputs: bytes   # PNG
+  steps:
+    - return qrcode.png(serialize(payload))
+
+flow display_on_kiosk
+  inputs: station_label, payload
+  steps:
+    - kiosk.render_qr(station_label, qrcode.png(serialize(payload)))

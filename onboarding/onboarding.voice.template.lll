@@ -1,0 +1,29 @@
+# LogLineID Onboarding Template - Embedding Vocal
+
+identity {
+  handle: "@danvoulez"
+  internal_id: "logline-id://danvoulez"
+  origin: "humano"
+  created_at: {{timestamp}}
+  status: "validado"
+  auth_methods: ["biometria_vocal"]
+  biometria_vocal: {
+    embedding: "{{voice_embedding_vector}}"
+    last_verified: {{timestamp}}
+    score: "{{similarity_score}}"
+  }
+  spans: [
+    span {
+      type: "voice_onboarding"
+      span_id: "{{uuid}}"
+      created_by: "logline-id://danvoulez"
+      timestamp: {{timestamp}}
+      provenance: "onboarding"
+      verification: {
+        method: "biometria_vocal"
+        score: "{{similarity_score}}"
+      }
+    }
+  ]
+  permissions: ["view timeline", "create spans", "assinar contratos"]
+}

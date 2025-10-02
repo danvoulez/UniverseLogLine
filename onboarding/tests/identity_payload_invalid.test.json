@@ -1,0 +1,10 @@
+{
+  "name": "Identity Payload Invalid",
+  "input": {
+    "logline_id": "bad",
+    "trust_score": 1.2
+  },
+  "expected": {
+    "valid": false
+  }
+}

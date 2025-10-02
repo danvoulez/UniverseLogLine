@@ -1,0 +1,24 @@
+module device_probe
+version: "1.0.0"
+
+flow collect_hardware
+  outputs: {
+    label: string, hostname: string, ip: string, mac: string,
+    ssh_pub: string, ram_gb: float, cpu_cores: int, disk_gb: float,
+    os: string, net_score: int, gpu_count: int, tags: list[string]
+  }
+  steps:
+    - let hostname = sys.hostname()
+    - let ip = net.primary_ip()
+    - let mac = net.primary_mac()
+    - let ssh_pub = sys.ensure_ssh_key("ed25519")
+    - let ram_gb = sys.ram_gb()
+    - let cpu_cores = sys.cpu_cores()
+    - let disk_gb = sys.disk_total_gb()
+    - let os = sys.os()
+    - let net_score = net.quality_score()
+    - let gpu_count = sys.gpu_count()
+    - return {
+        label: hostname, hostname, ip, mac, ssh_pub, ram_gb, cpu_cores, disk_gb, os,
+        net_score, gpu_count, tags: [os, "autoprovisioned"]
+      }

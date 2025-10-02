@@ -1,0 +1,33 @@
+module installer_bootstrap
+version: "1.0.0"
+
+# Gera e instala LaunchAgent (macOS) que chama o daemon do nó
+flow install_launch_agent
+  inputs: node_id
+  steps:
+    - let plist = template("""
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0"><dict>
+        <key>Label</key><string>com.logline.node</string>
+        <key>ProgramArguments</key><array>
+          <string>/usr/local/bin/logline_node</string><string>--daemon</string>
+        </array>
+        <key>RunAtLoad</key><true/>
+        <key>KeepAlive</key><true/>
+        <key>EnvironmentVariables</key><dict>
+          <key>LOGLINE_NODE_ID</key><string>{{ node_id }}</string>
+        </dict>
+      </dict></plist>
+      """, { node_id })
+    - file.write("~/Library/LaunchAgents/com.logline.node.plist", plist)
+    - sh("launchctl load ~/Library/LaunchAgents/com.logline.node.plist")
+    - emit span "bootstrap.launchd.installed" attrs { node_id }
+
+# Linux: systemd unit (opcional)
+flow install_systemd
+  inputs: node_id
+  steps:
+    - let unit = template("[Unit]\nDescription=LogLine Node\n[Service]\nExecStart=/usr/local/bin/logline_node --daemon\nEnvironment=LOGLINE_NODE_ID={{ node_id }}\nRestart=always\n[Install]\nWantedBy=multi-user.target\n", { node_id })
+    - file.write("/etc/systemd/system/logline-node.service", unit)
+    - sh("systemctl enable --now logline-node")

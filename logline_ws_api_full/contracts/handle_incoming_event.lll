@@ -1,0 +1,36 @@
+contract handle_incoming_event version "1.0.0" {
+  meta: { id: "vv.api.ws_webhook.dispatch"; description: "Roteia eventos JSON recebidos no WebSocket para ações computáveis."; }
+
+  on call with { ctx, data }:
+    assert type_of(data) == "object", "Payload deve ser JSON object";
+    let t = data.type ?? "";
+    match t {
+      "ping" => {
+        emit_span "ping" { llid: ctx.logline_id, ts: now() };
+        return { status: "ok", reply: { type: "pong", ts: now() }, webhook: null };
+      },
+      "feedback" => {
+        assert data.video_id != null, "feedback.video_id ausente";
+        assert data.value in ["like","dislike"], "feedback.value inválido";
+        emit_span "video_feedback" { video_id: data.video_id, value: data.value, llid: ctx.logline_id, ts: now() };
+        // opcional: encaminhar webhook
+        return { status: "ok", webhook: { event: "feedback", video_id: data.video_id, value: data.value, ts: now() } };
+      },
+      "request_queue" => {
+        // Placeholder: em produção, consultar fila/contrato de curadoria
+        let queue = [{ video_id: "X1" }, { video_id: "X2" }, { video_id: "X3" }];
+        return { status: "ok", reply: { type: "queue", items: queue } };
+      },
+      "announce_now_playing" => {
+        assert data.video_id != null, "announce.video_id ausente";
+        // broadcast para frontends conectados
+        call "runtime/websocket_broadcaster.lll" with { message: { type: "now_playing", video_id: data.video_id, title: data.title ?? "" } };
+        // webhook
+        return { status: "ok", webhook: { event: "now_playing", video_id: data.video_id, title: data.title ?? "", ts: now() } };
+      },
+      _ => {
+        emit_span "unhandled_type" { type: t, llid: ctx.logline_id, ts: now() };
+        return { status: "noop" };
+      }
+    }
+}

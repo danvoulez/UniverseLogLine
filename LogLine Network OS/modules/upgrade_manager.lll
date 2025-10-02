@@ -1,0 +1,33 @@
+module upgrade_manager
+version: "1.1.0"
+use timeline_logger as tl
+use core_schema as core
+
+entity Release
+  key: rel_id (uuid)
+  properties:
+    - tenant_id: string
+    - rel_id: uuid
+    - version: string
+    - canary_percent: core.percent = 5
+    - status: string = "staged"
+    - created_at: core.datetime
+
+flow stage_release
+  inputs: tenant_id, version, canary_percent?
+  outputs: Release
+  steps:
+    - create Release { tenant_id, rel_id: uuid(), version, canary_percent: canary_percent or 5, status: "staged", created_at: now() }
+    - tl.log_event(tenant_id, "upgrade.staged", self)
+
+flow roll_out
+  inputs: tenant_id, rel_id
+  steps:
+    - let r = select Release where rel_id=rel_id and tenant_id=tenant_id
+    - for node in pick_percent_of_nodes(r.canary_percent):
+        deploy(node, r.version)
+    - tl.log_event(tenant_id, "upgrade.canary_started", { rel_id, percent: r.canary_percent })
+
+policy auto_promote
+  when error_rate(version) < 0.5 and latency_p95(version) improves for "10m"
+  action set Release.status = "promoted" and extend canary_percent += 20

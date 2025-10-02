@@ -1,0 +1,55 @@
+flowchart LR
+  subgraph L0[Substrato]
+    A(core_schema)-->B(id_orchestration)
+    B-->C(secrets_vault)
+    B-->D(audit_wallet)
+    B-->E(attestation_hub)
+  end
+
+  subgraph L1[Enzimas]
+    F(enzyme_runtime)-->G(enzyme_catalog)
+    G-->H(enzyme_bindings)
+  end
+
+  subgraph L2[Políticas/Topologia]
+    I(magnetic_field)-->J(topology_model)
+    K(quota_policies)-->L(sla_manager)
+  end
+
+  subgraph L3[Execução/Dados]
+    M(node_registry)-->N(edge_connectivity)
+    M-->O(resource_allocator)
+    O-->P(memory_coordinator)
+    O-->Q(gpu_scheduler)
+    R(processing_distributor)-->S(storage_ec)
+  end
+
+  subgraph L4[Coordenação/Ops]
+    T(orchestration_multi)-->U(metrics_harvester)
+    T-->V(compliance_guard)
+    T-->W(upgrade_manager)
+    X(incident_response)-->Y(timeline_logger)
+  end
+
+  subgraph V4[Extensões]
+    CE(consensus_engine)-->FB(federation_bridge)
+    ZK(zero_knowledge_auth)-->PQC(quantum_resistant)
+    RT(realtime_sync)-->SC(smart_contracts)
+    IaC(infrastructure_as_code)-->OBS(observability_mesh)
+  end
+
+  subgraph Onboarding V3.1+
+    OB(onboarding_plugplay)-->API(onboarding_api)
+    API-->ZTD(zero_touch_discovery)
+    OB-->WAL(native_wallet_integration)
+    OB-->PROG(progressive_onboarding)
+    OB-->CLI(interactive_cli)
+  end
+
+  OB-->B
+  API-->M
+  T-->R
+  CE-->T
+  O--candidatos+bias-->R
+  I--bias-->O
+  F--triggers-->O
