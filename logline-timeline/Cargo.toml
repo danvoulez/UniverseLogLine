@@ -19,7 +19,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 logline-core = { path = "../logline-core" }
 logline-protocol = { path = "../logline-protocol" }
-logline-rules = { path = "../logline-rules" }
 sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "macros", "migrate"] }
 hyper = "1.4"
 

@@ -28,7 +28,6 @@ async fn rest_endpoints_work_when_ws_mesh_is_down() {
     let mut config = EngineServiceConfig::default();
     config.bind_address = addr.to_string();
     config.timeline_ws_url = Some("ws://127.0.0.1:59999/timeline".into());
-    config.rules_ws_url = Some("ws://127.0.0.1:59998/rules".into());
 
     let shutdown = builder.serve(config).await.expect("service started");
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;

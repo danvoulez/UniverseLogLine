@@ -6,6 +6,9 @@ use logline_core::websocket::{
     peer_from_env, ServiceIdentity, ServiceMeshClient, ServiceMeshClientHandle, ServiceMessage,
     ServiceMessageHandler, WebSocketPeer,
 };
+use logline_protocol::timeline::{Span, SpanStatus};
+use logline_rules::{Decision, RuleEngine};
+use serde_json::{json, Map, Value};
 use tracing::{debug, info, warn};
 use url::Url;
 
@@ -13,17 +16,17 @@ use crate::runtime::EngineHandle;
 use crate::EngineServiceConfig;
 
 const TIMELINE_PEER_NAME: &str = "logline-timeline";
-const RULES_PEER_NAME: &str = "logline-rules";
 
 /// Initialise the engine WebSocket mesh connections based on the provided configuration.
 pub fn start_service_mesh(handle: EngineHandle, config: &EngineServiceConfig) {
+    let rules = load_rule_engine(config);
     let peers = collect_peers(config);
     if peers.is_empty() {
         info!("engine service mesh disabled: no peers configured");
         return;
     }
 
-    let handler = Arc::new(EngineMeshHandler::new(handle));
+    let handler = Arc::new(EngineMeshHandler::new(handle, rules));
     let identity = ServiceIdentity::new(
         "logline-engine",
         vec![
@@ -43,12 +46,6 @@ fn collect_peers(config: &EngineServiceConfig) -> Vec<WebSocketPeer> {
     if let Some(peer) = peer_from_config(config.timeline_ws_url.as_deref(), TIMELINE_PEER_NAME) {
         peers.push(peer);
     } else if let Ok(Some(peer)) = peer_from_env("TIMELINE_WS_URL", TIMELINE_PEER_NAME) {
-        peers.push(peer);
-    }
-
-    if let Some(peer) = peer_from_config(config.rules_ws_url.as_deref(), RULES_PEER_NAME) {
-        peers.push(peer);
-    } else if let Ok(Some(peer)) = peer_from_env("RULES_WS_URL", RULES_PEER_NAME) {
         peers.push(peer);
     }
 
@@ -72,13 +69,56 @@ fn peer_from_config(value: Option<&str>, name: &str) -> Option<WebSocketPeer> {
     })
 }
 
+fn load_rule_engine(config: &EngineServiceConfig) -> Option<Arc<RuleEngine>> {
+    let candidate = config
+        .rules_path
+        .as_deref()
+        .map(str::to_owned)
+        .or_else(|| std::env::var("ENGINE_RULES_PATH").ok())
+        .or_else(|| std::env::var("RULES_PATH").ok());
+
+    match candidate {
+        Some(path) => {
+            let trimmed = path.trim();
+            if trimmed.is_empty() {
+                warn!("rule engine path configured but empty; skipping local evaluation");
+                return None;
+            }
+
+            match RuleEngine::from_path(trimmed) {
+                Ok(engine) => {
+                    let count = engine.rules().len();
+                    if count == 0 {
+                        warn!(%trimmed, "rule engine loaded with no rules");
+                    } else {
+                        info!(rule_count = count, %trimmed, "loaded local rule engine");
+                    }
+                    Some(Arc::new(engine))
+                }
+                Err(err) => {
+                    warn!(%trimmed, ?err, "failed to load local rule definitions");
+                    None
+                }
+            }
+        }
+        None => {
+            debug!("no rule engine configuration provided; engine will skip local evaluation");
+            None
+        }
+    }
+}
+
 struct EngineMeshHandler {
     _handle: EngineHandle,
+    rules: Option<Arc<RuleEngine>>,
 }
 
 impl EngineMeshHandler {
-    fn new(handle: EngineHandle) -> Self {
-        Self { _handle: handle }
+    fn new(handle: EngineHandle, rules: Option<Arc<RuleEngine>>) -> Self {
+        Self {
+            _handle: handle,
+            rules,
+        }
     }
 }
 
@@ -118,21 +158,92 @@ impl ServiceMessageHandler for EngineMeshHandler {
                 metadata,
             } => {
                 info!(peer = %peer.name, %span_id, "received span via mesh");
-                if let Some(tenant) = tenant_id {
-                    let request = ServiceMessage::RuleEvaluationRequest {
-                        request_id: span_id.clone(),
-                        tenant_id: tenant.clone(),
-                        span,
-                    };
-                    if let Err(err) = client.send_to(RULES_PEER_NAME, request).await {
-                        warn!(%span_id, %tenant, ?err, "failed to dispatch rule evaluation request");
-                    }
+                if metadata.is_null() {
+                    debug!(peer = %peer.name, %span_id, "span metadata not provided");
                 } else {
-                    warn!(peer = %peer.name, %span_id, "span lacks tenant identifier; skipping rule evaluation");
+                    debug!(peer = %peer.name, %span_id, metadata = ?metadata, "span metadata received");
                 }
 
-                if !metadata.is_null() {
-                    debug!(peer = %peer.name, %span_id, metadata = ?metadata, "span metadata received");
+                if tenant_id.is_none() {
+                    warn!(peer = %peer.name, %span_id, "span lacks tenant identifier; proceeding without tenant context");
+                }
+
+                if let Some(engine) = &self.rules {
+                    match serde_json::from_value::<Span>(span.clone()) {
+                        Ok(mut parsed_span) => {
+                            let mut outcome = engine.apply(&mut parsed_span);
+                            let decision = outcome.decision.clone();
+
+                            if let Decision::Simulate { note } = &decision {
+                                parsed_span.status = SpanStatus::Simulated;
+                                if let Some(note) = note {
+                                    parsed_span.add_metadata(
+                                        "simulation_note",
+                                        Value::String(note.clone()),
+                                    );
+                                }
+                            }
+
+                            if !outcome.applied_rules.is_empty() || !outcome.notes.is_empty() {
+                                parsed_span.add_metadata(
+                                    "rule_engine",
+                                    json!({
+                                        "rules": outcome.applied_rules.clone(),
+                                        "notes": outcome.notes.clone(),
+                                    }),
+                                );
+                            }
+
+                            let mut metadata_updates = Map::new();
+                            for (key, value) in &outcome.metadata_updates {
+                                metadata_updates.insert(key.clone(), value.clone());
+                            }
+
+                            let decision_label = match &decision {
+                                Decision::Allow => "allow",
+                                Decision::Reject { .. } => "reject",
+                                Decision::Simulate { .. } => "simulate",
+                            };
+
+                            info!(
+                                peer = %peer.name,
+                                %span_id,
+                                tenant = tenant_id.as_deref().unwrap_or("unknown"),
+                                decision = decision_label,
+                                applied_rules = outcome.applied_rules.len(),
+                                "evaluated span locally"
+                            );
+
+                            let success = !matches!(decision, Decision::Reject { .. });
+                            let output = json!({
+                                "decision": decision_label,
+                                "applied_rules": outcome.applied_rules,
+                                "notes": outcome.notes,
+                                "added_tags": outcome.added_tags,
+                                "metadata_updates": metadata_updates,
+                                "span": parsed_span,
+                            });
+
+                            if let Err(err) = client
+                                .send_to(
+                                    TIMELINE_PEER_NAME,
+                                    ServiceMessage::RuleExecutionResult {
+                                        result_id: span_id.clone(),
+                                        success,
+                                        output,
+                                    },
+                                )
+                                .await
+                            {
+                                warn!(%span_id, ?err, "failed to forward rule execution result to timeline");
+                            }
+                        }
+                        Err(err) => {
+                            warn!(peer = %peer.name, %span_id, ?err, "failed to decode span for evaluation");
+                        }
+                    }
+                } else {
+                    debug!(peer = %peer.name, %span_id, "no local rule engine configured; skipping evaluation");
                 }
             }
             ServiceMessage::RuleExecutionResult {

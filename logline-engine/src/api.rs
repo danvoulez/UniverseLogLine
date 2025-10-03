@@ -28,7 +28,7 @@ pub struct EngineServiceConfig {
     #[serde(default)]
     pub timeline_ws_url: Option<String>,
     #[serde(default)]
-    pub rules_ws_url: Option<String>,
+    pub rules_path: Option<String>,
 }
 
 fn default_bind_address() -> String {
@@ -45,7 +45,7 @@ impl Default for EngineServiceConfig {
             bind_address: default_bind_address(),
             workers: default_worker_count(),
             timeline_ws_url: None,
-            rules_ws_url: None,
+            rules_path: None,
         }
     }
 }
