@@ -4,8 +4,10 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
+use axum::async_trait;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
+use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -51,13 +53,7 @@ async fn main() -> Result<(), ServerError> {
         service_bus,
     };
 
-    let app = Router::new()
-        .route("/health", get(health_check))
-        .route("/v1/spans", get(list_spans).post(create_span))
-        .route("/v1/spans/:id", get(get_span))
-        .route("/ws", get(ws_upgrade))
-        .route("/ws/service", get(service_ws_upgrade))
-        .with_state(state.clone());
+    let app = build_app(state);
 
     let listener = TcpListener::bind(bind_addr).await?;
     let actual_addr = listener.local_addr()?;
@@ -65,6 +61,16 @@ async fn main() -> Result<(), ServerError> {
     axum::serve(listener, app.into_make_service()).await?;
 
     Ok(())
+}
+
+fn build_app(state: AppState) -> Router<()> {
+    Router::new()
+        .route("/health", get(health_check))
+        .route("/v1/spans", get(list_spans).post(create_span))
+        .route("/v1/spans/:id", get(get_span))
+        .route("/ws", get(ws_upgrade))
+        .route("/ws/service", get(service_ws_upgrade))
+        .with_state::<()>(state)
 }
 
 fn load_timeline_config() -> Result<CoreConfig, LogLineError> {
@@ -76,6 +82,54 @@ fn load_timeline_config() -> Result<CoreConfig, LogLineError> {
 async fn health_check() -> &'static str {
     "ok"
 }
+
+#[derive(Debug, Clone)]
+struct AppError {
+    status: StatusCode,
+    message: String,
+}
+
+impl AppError {
+    fn bad_request<M: Into<String>>(message: M) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: message.into(),
+        }
+    }
+
+    fn not_found<M: Into<String>>(message: M) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
+
+    fn internal<M: Into<String>>(message: M) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: message.into(),
+        }
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let body = Json(serde_json::json!({ "error": self.message }));
+        (self.status, body).into_response()
+    }
+}
+
+impl From<LogLineError> for AppError {
+    fn from(err: LogLineError) -> Self {
+        match err {
+            LogLineError::InvalidSpanId(message) => AppError::bad_request(message),
+            LogLineError::SpanNotFound(message) => AppError::not_found(message),
+            other => AppError::internal(other.to_string()),
+        }
+    }
+}
+
+type AppResult<T> = Result<T, AppError>;
 
 #[derive(Clone)]
 struct AppState {
@@ -152,16 +206,61 @@ impl ServiceBus {
     }
 }
 
-type AppResult<T> = Result<T, AppError>;
+#[derive(Clone, Debug)]
+struct TenantGuard {
+    tenant_id: String,
+}
+
+impl TenantGuard {
+    fn tenant_id(&self) -> &str {
+        &self.tenant_id
+    }
+
+    fn into_inner(self) -> String {
+        self.tenant_id
+    }
+}
+
+#[async_trait]
+impl<S> FromRequestParts<S> for TenantGuard
+where
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let tenant_id = parts
+            .headers
+            .get("x-tenant-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| AppError::bad_request("missing X-Tenant-ID header"))?;
+
+        Ok(Self {
+            tenant_id: tenant_id.to_string(),
+        })
+    }
+}
 
 async fn create_span(
     State(state): State<AppState>,
+    tenant: TenantGuard,
     Json(payload): Json<CreateSpanRequest>,
 ) -> AppResult<Json<TimelineEntry>> {
-    let span = payload.into_span();
+    if let Some(ref provided) = payload.tenant_id {
+        if provided != tenant.tenant_id() {
+            return Err(AppError::bad_request(
+                "tenant mismatch between header and payload",
+            ));
+        }
+    }
+
+    let tenant_id = tenant.into_inner();
+    let span = payload.into_span(&tenant_id);
     let span_snapshot = span.clone();
 
-    let entry = state.repository.create_span(span).await?;
+    let entry = state.repository.create_span(&tenant_id, span).await?;
 
     if let Err(err) = state.broadcaster.send(entry.clone()) {
         warn!(?err, "failed to broadcast new span");
@@ -196,11 +295,13 @@ async fn create_span(
 
 async fn get_span(
     State(state): State<AppState>,
+    tenant: TenantGuard,
     Path(id): Path<Uuid>,
 ) -> AppResult<Json<TimelineEntry>> {
+    let tenant_id = tenant.into_inner();
     let entry = state
         .repository
-        .get_span(id)
+        .get_span(&tenant_id, id)
         .await?
         .ok_or_else(|| AppError::not_found("span not found"))?;
 
@@ -209,36 +310,46 @@ async fn get_span(
 
 async fn list_spans(
     State(state): State<AppState>,
-    Query(query): Query<TimelineQuery>,
+    tenant: TenantGuard,
+    Query(mut query): Query<TimelineQuery>,
 ) -> AppResult<Json<Vec<TimelineEntry>>> {
-    let entries = state.repository.list_spans(&query).await?;
+    let tenant_id = tenant.into_inner();
+
+    if let Some(ref provided) = query.tenant_id {
+        if provided != &tenant_id {
+            return Err(AppError::bad_request(
+                "tenant mismatch between header and query",
+            ));
+        }
+    }
+
+    query.tenant_id = Some(tenant_id.clone());
+    let entries = state.repository.list_spans(&tenant_id, &query).await?;
     Ok(Json(entries))
 }
 
-async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| async move {
-        if let Err(err) = handle_socket(socket, state).await {
+async fn ws_upgrade(
+    ws: WebSocketUpgrade,
+    tenant: TenantGuard,
+    State(state): State<AppState>,
+) -> AppResult<impl IntoResponse> {
+    let tenant_key = state
+        .repository
+        .resolve_tenant_key(tenant.tenant_id())
+        .await?
+        .to_string();
+
+    Ok(ws.on_upgrade(move |socket| async move {
+        if let Err(err) = handle_socket(socket, state, tenant_key).await {
             warn!(?err, "timeline websocket closed with error");
         }
-    })
+    }))
 }
 
-async fn service_ws_upgrade(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| async move {
-        if let Err(err) = handle_service_socket(socket, state).await {
-            warn!(?err, "timeline service websocket closed with error");
-        }
-    })
-}
-
-async fn handle_socket(socket: WebSocket, state: AppState) -> AppResult<()> {
+async fn handle_socket(socket: WebSocket, state: AppState, tenant_key: String) -> AppResult<()> {
     let (mut sender, mut receiver) = socket.split();
     let mut rx = state.subscribe();
 
-    // Drain incoming messages so the socket stays healthy.
     tokio::spawn(async move {
         while let Some(result) = receiver.next().await {
             if let Err(err) = result {
@@ -255,6 +366,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) -> AppResult<()> {
         .map_err(|err| AppError::internal(format!("failed to send ready message: {err}")))?;
 
     while let Ok(entry) = rx.recv().await {
+        if entry.tenant_id.as_deref() != Some(&tenant_key) {
+            continue;
+        }
+
         match serde_json::to_string(&entry) {
             Ok(serialized) => {
                 if let Err(err) = sender.send(Message::Text(serialized)).await {
@@ -268,6 +383,17 @@ async fn handle_socket(socket: WebSocket, state: AppState) -> AppResult<()> {
     }
 
     Ok(())
+}
+
+async fn service_ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        if let Err(err) = handle_service_socket(socket, state).await {
+            warn!(?err, "timeline service websocket closed with error");
+        }
+    })
 }
 
 async fn handle_service_socket(socket: WebSocket, state: AppState) -> AppResult<()> {
@@ -418,7 +544,7 @@ struct CreateSpanRequest {
 }
 
 impl CreateSpanRequest {
-    fn into_span(self) -> Span {
+    fn into_span(self, tenant_id: &str) -> Span {
         Span {
             id: self.id.unwrap_or_else(Uuid::new_v4),
             timestamp: self.timestamp.unwrap_or_else(Utc::now),
@@ -435,7 +561,7 @@ impl CreateSpanRequest {
             delta_s: self.delta_s,
             replay_count: self.replay_count,
             replay_from: self.replay_from,
-            tenant_id: self.tenant_id,
+            tenant_id: Some(tenant_id.to_string()),
             organization_id: self.organization_id,
             user_id: self.user_id,
             span_type: self.span_type,
@@ -460,48 +586,362 @@ enum ServerError {
     Server(#[from] HyperError),
 }
 
-#[derive(Debug, Clone)]
-struct AppError {
-    status: StatusCode,
-    message: String,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::{anyhow, Result as AnyResult};
+    use axum::body::Body;
+    use axum::http::{HeaderValue, Request, StatusCode};
+    use futures::StreamExt;
+    use logline_core::db::DatabasePool;
+    use pg_embed::pg_enums::PgAuthMethod;
+    use pg_embed::pg_fetch::{PgFetchSettings, PG_V15};
+    use pg_embed::postgres::{PgEmbed, PgSettings};
+    use portpicker::pick_unused_port;
+    use reqwest::Client;
+    use serde_json::json;
+    use std::time::Duration;
+    use tempfile::TempDir;
+    use tokio::net::TcpListener;
+    use tokio::time::timeout;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-impl AppError {
-    fn bad_request<M: Into<String>>(message: M) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            message: message.into(),
+    struct EmbeddedPg {
+        instance: PgEmbed,
+        _data_dir: TempDir,
+        db_name: String,
+    }
+
+    impl EmbeddedPg {
+        async fn new() -> AnyResult<Self> {
+            let data_dir = TempDir::new()?;
+            let port = pick_unused_port().expect("unused port");
+
+            let pg_settings = PgSettings {
+                database_dir: data_dir.path().to_path_buf(),
+                port,
+                user: "postgres".into(),
+                password: "password".into(),
+                auth_method: PgAuthMethod::Plain,
+                persistent: false,
+                timeout: Some(Duration::from_secs(15)),
+                migration_dir: None,
+            };
+
+            let fetch_settings = PgFetchSettings {
+                version: PG_V15,
+                ..Default::default()
+            };
+
+            let mut instance = PgEmbed::new(pg_settings, fetch_settings).await?;
+            instance.setup().await?;
+            instance.start_db().await?;
+
+            Ok(Self {
+                instance,
+                _data_dir: data_dir,
+                db_name: "postgres".to_string(),
+            })
+        }
+
+        fn database_url(&self) -> String {
+            self.instance.full_db_uri(&self.db_name)
+        }
+
+        async fn stop(mut self) -> AnyResult<()> {
+            self.instance.stop_db().await?;
+            Ok(())
         }
     }
 
-    fn not_found<M: Into<String>>(message: M) -> Self {
-        Self {
-            status: StatusCode::NOT_FOUND,
-            message: message.into(),
+    #[derive(Clone, Copy)]
+    struct TenantContext {
+        alias: &'static str,
+        organization_id: Uuid,
+    }
+
+    struct TestHarness {
+        embedded: EmbeddedPg,
+        state: AppState,
+        tenant_a: TenantContext,
+        tenant_b: TenantContext,
+    }
+
+    impl TestHarness {
+        async fn setup() -> AnyResult<Option<Self>> {
+            let embedded = match EmbeddedPg::new().await {
+                Ok(pg) => pg,
+                Err(err) => {
+                    eprintln!("skipping timeline integration test: {err}");
+                    return Ok(None);
+                }
+            };
+
+            let database_url = embedded.database_url();
+            let pool = DatabasePool::connect_with_url(&database_url).await?;
+            sqlx::query("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
+                .execute(pool.inner())
+                .await?;
+
+            let repository = TimelineRepository::from_pool(pool.clone()).await?;
+            let (tx, _rx) = broadcast::channel(128);
+            let state = AppState {
+                repository,
+                broadcaster: tx,
+                service_bus: ServiceBus::new(),
+            };
+
+            let tenant_a = TenantContext {
+                alias: "tenant-alpha",
+                organization_id: insert_organization(&state.repository, "tenant-alpha").await?,
+            };
+            let tenant_b = TenantContext {
+                alias: "tenant-beta",
+                organization_id: insert_organization(&state.repository, "tenant-beta").await?,
+            };
+
+            Ok(Some(Self {
+                embedded,
+                state,
+                tenant_a,
+                tenant_b,
+            }))
+        }
+
+        fn router(&self) -> Router<()> {
+            build_app(self.state.clone())
+        }
+
+        fn state(&self) -> AppState {
+            self.state.clone()
+        }
+
+        async fn teardown(self) -> AnyResult<()> {
+            self.embedded.stop().await
         }
     }
 
-    fn internal<M: Into<String>>(message: M) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: message.into(),
-        }
+    async fn insert_organization(repo: &TimelineRepository, alias: &str) -> AnyResult<Uuid> {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO organizations (id, tenant_id, name, display_name) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(id)
+        .bind(alias)
+        .bind(format!("{alias} name"))
+        .bind(format!("{alias} display"))
+        .execute(repo.pool().inner())
+        .await?;
+        Ok(id)
     }
-}
 
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        let body = Json(serde_json::json!({ "error": self.message }));
-        (self.status, body).into_response()
+    #[tokio::test]
+    async fn tenant_guard_requires_header() -> AnyResult<()> {
+        let request = Request::builder().uri("/").body(Body::empty()).unwrap();
+        let (mut parts, _) = request.into_parts();
+
+        let result = TenantGuard::from_request_parts(&mut parts, &()).await;
+        assert!(result.is_err(), "missing header should be rejected");
+
+        Ok(())
     }
-}
 
-impl From<LogLineError> for AppError {
-    fn from(err: LogLineError) -> Self {
-        match err {
-            LogLineError::InvalidSpanId(message) => AppError::bad_request(message),
-            LogLineError::SpanNotFound(message) => AppError::not_found(message),
-            other => AppError::internal(other.to_string()),
+    #[tokio::test]
+    async fn tenant_guard_extracts_header() -> AnyResult<()> {
+        let request = Request::builder()
+            .uri("/")
+            .header("X-Tenant-ID", "  tenant-alpha  ")
+            .body(Body::empty())
+            .unwrap();
+        let (mut parts, _) = request.into_parts();
+
+        let guard = TenantGuard::from_request_parts(&mut parts, &())
+            .await
+            .map_err(|err| anyhow!(err.message))?;
+        assert_eq!(guard.tenant_id(), "tenant-alpha");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn timeline_rest_endpoints_are_tenant_isolated() -> AnyResult<()> {
+        let Some(harness) = TestHarness::setup().await? else {
+            return Ok(());
+        };
+
+        let state = harness.state();
+
+        let mismatch_payload: CreateSpanRequest = serde_json::from_value(json!({
+            "logline_id": "mismatch",
+            "title": "tenant mismatch",
+            "tenant_id": harness.tenant_b.alias,
+            "organization_id": harness.tenant_a.organization_id,
+            "span_type": "user",
+        }))?;
+        let mismatch = create_span(
+            State(state.clone()),
+            TenantGuard {
+                tenant_id: harness.tenant_a.alias.to_string(),
+            },
+            Json(mismatch_payload),
+        )
+        .await;
+        let error = mismatch.expect_err("mismatched tenant should be rejected");
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+
+        let alpha_payload: CreateSpanRequest = serde_json::from_value(json!({
+            "logline_id": "alpha",
+            "title": "alpha span",
+            "organization_id": harness.tenant_a.organization_id,
+            "span_type": "user",
+            "visibility": "private",
+        }))?;
+        let Json(entry_alpha) = create_span(
+            State(state.clone()),
+            TenantGuard {
+                tenant_id: harness.tenant_a.alias.to_string(),
+            },
+            Json(alpha_payload),
+        )
+        .await
+        .map_err(|err| anyhow!(err.message))?;
+
+        let beta_payload: CreateSpanRequest = serde_json::from_value(json!({
+            "logline_id": "beta",
+            "title": "beta span",
+            "organization_id": harness.tenant_b.organization_id,
+            "span_type": "system",
+            "visibility": "organization",
+        }))?;
+        let Json(entry_beta) = create_span(
+            State(state.clone()),
+            TenantGuard {
+                tenant_id: harness.tenant_b.alias.to_string(),
+            },
+            Json(beta_payload),
+        )
+        .await
+        .map_err(|err| anyhow!(err.message))?;
+
+        let Json(spans_alpha) = list_spans(
+            State(state.clone()),
+            TenantGuard {
+                tenant_id: harness.tenant_a.alias.to_string(),
+            },
+            Query(TimelineQuery {
+                tenant_id: Some(harness.tenant_a.alias.to_string()),
+                ..TimelineQuery::default()
+            }),
+        )
+        .await
+        .map_err(|err| anyhow!(err.message))?;
+        assert_eq!(spans_alpha.len(), 1);
+        assert_eq!(spans_alpha[0].id, entry_alpha.id);
+
+        let Json(spans_beta) = list_spans(
+            State(state.clone()),
+            TenantGuard {
+                tenant_id: harness.tenant_b.alias.to_string(),
+            },
+            Query(TimelineQuery {
+                tenant_id: Some(harness.tenant_b.alias.to_string()),
+                ..TimelineQuery::default()
+            }),
+        )
+        .await
+        .map_err(|err| anyhow!(err.message))?;
+        assert_eq!(spans_beta.len(), 1);
+        assert_eq!(spans_beta[0].id, entry_beta.id);
+
+        let cross = get_span(
+            State(state.clone()),
+            TenantGuard {
+                tenant_id: harness.tenant_a.alias.to_string(),
+            },
+            Path(entry_beta.id),
+        )
+        .await;
+        assert!(cross.is_err(), "cross-tenant access should fail");
+        if let Err(err) = cross {
+            assert_eq!(err.status, StatusCode::NOT_FOUND);
         }
+
+        let app = harness.router();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let server = tokio::spawn(async move {
+            if let Err(err) = axum::serve(listener, app.into_make_service()).await {
+                error!(?err, "test server error");
+            }
+        });
+
+        let mut request = format!("ws://{addr}/ws").into_client_request()?;
+        request.headers_mut().insert(
+            "x-tenant-id",
+            HeaderValue::from_str(harness.tenant_a.alias)?,
+        );
+        let (mut socket, _) = connect_async(request).await?;
+
+        let ready = socket
+            .next()
+            .await
+            .ok_or_else(|| anyhow!("websocket closed before ready"))??;
+        assert_eq!(ready.into_text()?, "{\"type\":\"ready\"}");
+
+        let client = Client::new();
+        let base_url = format!("http://{addr}");
+
+        let created_alpha: TimelineEntry = client
+            .post(format!("{base_url}/v1/spans"))
+            .header("x-tenant-id", harness.tenant_a.alias)
+            .json(&json!({
+                "logline_id": "alpha-ws",
+                "title": "alpha websocket span",
+                "organization_id": harness.tenant_a.organization_id,
+                "span_type": "user",
+                "visibility": "private",
+            }))
+            .send()
+            .await?
+            .error_for_status()? // ensure success
+            .json()
+            .await?;
+
+        let message = timeout(Duration::from_secs(2), socket.next())
+            .await
+            .map_err(|_| anyhow!("did not receive websocket payload"))?
+            .ok_or_else(|| anyhow!("websocket closed unexpectedly"))??;
+        let received_alpha: TimelineEntry = serde_json::from_str(&message.into_text()?)?;
+        assert_eq!(received_alpha.id, created_alpha.id);
+        assert_eq!(
+            received_alpha.tenant_id,
+            Some(harness.tenant_a.organization_id.to_string())
+        );
+
+        client
+            .post(format!("{base_url}/v1/spans"))
+            .header("x-tenant-id", harness.tenant_b.alias)
+            .json(&json!({
+                "logline_id": "beta-ws",
+                "title": "beta websocket span",
+                "organization_id": harness.tenant_b.organization_id,
+                "span_type": "system",
+                "visibility": "organization",
+            }))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let cross = timeout(Duration::from_millis(300), socket.next()).await;
+        assert!(cross.is_err(), "unexpected cross-tenant websocket payload");
+
+        socket.close(None).await?;
+        server.abort();
+        let _ = server.await;
+
+        harness.teardown().await?;
+        Ok(())
     }
 }
