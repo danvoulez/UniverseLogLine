@@ -145,7 +145,7 @@ async fn ws_upgrade(
             StatusCode::UNAUTHORIZED
         })?;
 
-    info!(subject = %context.subject, "cliente WebSocket autenticado");
+    info!(user_id = %context.user_id, "cliente WebSocket autenticado");
 
     Ok(ws.on_upgrade(move |socket| async move {
         if let Err(err) = handle_connection(socket, state.clone(), context.clone()).await {
@@ -161,7 +161,7 @@ async fn handle_connection(
 ) -> Result<(), LogLineError> {
     let (mut sender, mut receiver) = socket.split();
     let (client_id, mut outbound) = state.clients.register().await;
-    info!(%client_id, subject = %context.subject, "cliente WebSocket conectado ao gateway");
+    info!(%client_id, user_id = %context.user_id, "cliente WebSocket conectado ao gateway");
 
     let mut mesh_handle = state.mesh_handle.clone();
     let clients = state.clients.clone();
@@ -169,37 +169,37 @@ async fn handle_connection(
 
     loop {
         tokio::select! {
-            Some(payload) = outbound.recv() => {
-                trace!(%client_id, "enviando mensagem broadcast para cliente");
-                if sender.send(Message::Text(payload)).await.is_err() {
-                    break;
-                }
-            }
-            Some(incoming) = receiver.next() => {
-                let message = incoming.map_err(|err| LogLineError::TransportError(err.to_string()))?;
-                match message {
-                    Message::Text(text) => {
-                        handle_client_payload(&mut mesh_handle, &clients, &router, &state.resilience, &client_id, Message::Text(text)).await?;
-                    }
-                    Message::Binary(bytes) => {
-                        handle_client_payload(&mut mesh_handle, &clients, &router, &state.resilience, &client_id, Message::Binary(bytes)).await?;
-                    }
-                    Message::Ping(payload) => {
-                        sender.send(Message::Pong(payload)).await.map_err(|err| LogLineError::TransportError(err.to_string()))?;
-                    }
-                    Message::Pong(_) => {}
-                    Message::Close(frame) => {
-                        debug!(%client_id, frame = ?frame, "cliente encerrou conexão");
+                Some(payload) = outbound.recv() => {
+                    trace!(%client_id, "enviando mensagem broadcast para cliente");
+                    if sender.send(Message::Text(payload)).await.is_err() {
                         break;
                     }
                 }
+                Some(incoming) = receiver.next() => {
+                    let message = incoming.map_err(|err| LogLineError::TransportError(err.to_string()))?;
+                    match message {
+                        Message::Text(text) => {
+                            handle_client_payload(&mut mesh_handle, &clients, &router, &state.resilience, &client_id, Message::Text(text)).await?;
+                        }
+                        Message::Binary(bytes) => {
+                            handle_client_payload(&mut mesh_handle, &clients, &router, &state.resilience, &client_id, Message::Binary(bytes)).await?;
+                        }
+                        Message::Ping(payload) => {
+                            sender.send(Message::Pong(payload)).await.map_err(|err| LogLineError::TransportError(err.to_string()))?;
+                        }
+                        Message::Pong(_) => {}
+                Message::Close(frame) => {
+                    debug!(%client_id, frame = ?frame, "cliente encerrou conexão");
+                    break;
+                }
             }
-            else => break,
         }
+                else => break,
+            }
     }
 
     clients.unregister(&client_id).await;
-    info!(%client_id, subject = %context.subject, "cliente WebSocket desconectado");
+    info!(%client_id, user_id = %context.user_id, "cliente WebSocket desconectado");
 
     Ok(())
 }

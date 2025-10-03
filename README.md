@@ -224,6 +224,16 @@ Your local LogLine Universe is now fully operational.
     ```
 *   **Start Interacting**: Use the (forthcoming) LogLine CLI or build an application with the SDKs to start creating `spans` and building your own institutional memory.
 
+### Step 6: Iterate Quickly (Hot Reload & Hybrid Mode)
+
+*   **Container hot reload**: `docker compose watch logline-engine` ativa o sync automático de arquivos `.rs` para o container e recompila somente quando `Cargo.toml` muda.
+*   **Rodar nativamente com infra containerizada**: o script `scripts/dev-hybrid.sh` liga Postgres/Redis/rules/timeline via Docker e executa o serviço selecionado com `cargo run`.
+    ```bash
+    scripts/dev-hybrid.sh logline-engine
+    scripts/dev-hybrid.sh logline-timeline
+    ```
+    Ideal para usar o IDE local, `cargo watch` e outras ferramentas da linha de comando sem abrir mão do ecossistema já provisionado.
+
 ## 🎯 Use Cases: What You Can Build
 
 LogLine is not an application; it is a foundation. Here are a few examples of the systems you can build with it:

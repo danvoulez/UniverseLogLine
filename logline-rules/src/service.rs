@@ -48,25 +48,56 @@ pub struct EvaluationRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluationResponse {
-    pub decision: String,
+    pub decision: DecisionPayload,
     pub applied_rules: Vec<String>,
     pub notes: Vec<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub metadata_updates: Map<String, Value>,
+    pub span: Span,
 }
 
-impl From<EnforcementOutcome> for EvaluationResponse {
-    fn from(value: EnforcementOutcome) -> Self {
-        let decision = match value.decision {
-            crate::Decision::Allow => "allow".to_string(),
-            crate::Decision::Reject { .. } => "reject".to_string(),
-            crate::Decision::Simulate { .. } => "simulate".to_string(),
-        };
-
+impl EvaluationResponse {
+    fn from_outcome(outcome: EnforcementOutcome, span: Span) -> Self {
         Self {
-            decision,
-            applied_rules: value.applied_rules,
-            notes: value.notes,
-            tags: value.added_tags,
+            decision: DecisionPayload::from(&outcome.decision),
+            applied_rules: outcome.applied_rules,
+            notes: outcome.notes,
+            tags: outcome.added_tags,
+            metadata_updates: metadata_updates_to_map(&outcome.metadata_updates),
+            span,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionPayload {
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl From<&Decision> for DecisionPayload {
+    fn from(value: &Decision) -> Self {
+        match value {
+            Decision::Allow => Self {
+                state: "allow".to_string(),
+                reason: None,
+                note: None,
+            },
+            Decision::Reject { reason } => Self {
+                state: "reject".to_string(),
+                reason: Some(reason.clone()),
+                note: None,
+            },
+            Decision::Simulate { note } => Self {
+                state: "simulate".to_string(),
+                reason: None,
+                note: note.clone(),
+            },
         }
     }
 }
@@ -234,7 +265,7 @@ async fn evaluate_span(
     let engine: RuleEngine = state.store.engine_for(&tenant);
     let mut span = payload.span;
     let outcome = engine.apply(&mut span);
-    Json(EvaluationResponse::from(outcome))
+    Json(EvaluationResponse::from_outcome(outcome, span))
 }
 
 async fn service_ws_upgrade(
@@ -355,7 +386,7 @@ async fn process_service_message(
 }
 
 fn outcome_to_value(outcome: &EnforcementOutcome, span: &Span) -> Value {
-    let metadata = metadata_updates_to_map(&outcome.metadata_updates);
+    let metadata = Value::Object(metadata_updates_to_map(&outcome.metadata_updates));
     json!({
         "decision": decision_to_value(&outcome.decision),
         "applied_rules": outcome.applied_rules.clone(),
@@ -366,12 +397,12 @@ fn outcome_to_value(outcome: &EnforcementOutcome, span: &Span) -> Value {
     })
 }
 
-fn metadata_updates_to_map(updates: &[(String, Value)]) -> Value {
+fn metadata_updates_to_map(updates: &[(String, Value)]) -> Map<String, Value> {
     let mut map = Map::new();
     for (key, value) in updates {
         map.insert(key.clone(), value.clone());
     }
-    Value::Object(map)
+    map
 }
 
 fn decision_to_value(decision: &Decision) -> Value {
