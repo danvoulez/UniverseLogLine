@@ -1,38 +1,28 @@
-//! LogLine: Sistema de registro distribuído para instituições computacionais
+//! LogLine Universe: Distributed logging and identity system
 //!
-//! LogLine é um sistema de registro distribuído que utiliza spans como unidade
-//! fundamental de realidade, projetado para implementar instituições computacionais.
+//! LogLine Universe is a modern microservices architecture for distributed logging,
+//! identity management, and rule processing with WebSocket mesh communication.
 //!
-//! # Arquitetura
+//! # Architecture
 //!
-//! O sistema é dividido em vários módulos:
+//! The system consists of independent microservices:
 //!
-//! * `cli`: Interface de linha de comando para interagir com o sistema
-//! * `enforcement`: Sistema de aplicação de regras e políticas
-//! * `federation`: Federação entre nós LogLine
-//! * `grammar`: Gramáticas para validação de spans
-//! * `infra`: Componentes de infraestrutura como identidades
-//! * `motor`: Motor de execução e processamento de spans
-//! * `rules`: Regras de negócio e validação
-//! * `time`: Gerenciamento de tempo e clocks
-//! * `timeline`: Armazenamento e manipulação de timelines
+//! * `logline-core`: Shared utilities, WebSocket mesh, and identity management
+//! * `logline-protocol`: Communication protocols and message formats
+//! * `logline-id`: Identity service with cryptographic signatures
+//! * `logline-timeline`: Timeline service with PostgreSQL backend
+//! * `logline-rules`: Rules engine and grammar processing
+//! * `logline-engine`: Execution runtime and task scheduler
+//!
+//! # Federation
+//!
+//! The system supports federation between nodes for distributed operation.
 
-// Exporta módulos
-pub mod cli;
-pub mod enforcement;
-pub mod federation;
-pub mod grammar;
-pub mod infra;
-pub mod motor;
-pub mod rules;
-pub mod time;
-pub mod timeline;
+// Federation is available as an independent module in the federation/ directory
 
-// Re-exporta símbolos comumente utilizados
-pub use motor::span::Span;
-pub use timeline::Timeline;
-pub use enforcement::enforcer::Enforcer;
-pub use infra::id::{LogLineID, LogLineKeyPair, LogLineIDBuilder};
+// Re-export core types from the microservices
+pub use logline_core::{LogLineID, LogLineKeyPair};
+pub use logline_protocol::timeline::Span;
 
 /// Versão do protocolo LogLine
 pub const LOGLINE_PROTOCOL_VERSION: &str = "0.1.0";

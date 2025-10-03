@@ -22,7 +22,7 @@ impl TimelineRepository {
 
     /// Builds the repository from an existing database pool.
     pub async fn from_pool(pool: DatabasePool) -> Result<Self> {
-        sqlx::migrate!("../timeline/migrations")
+        sqlx::migrate!("../migrations")
             .run(pool.inner())
             .await
             .map_err(|err| LogLineError::TimelineError(err.to_string()))?;
