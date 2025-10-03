@@ -3,7 +3,7 @@
 ########################################
 # Build stage
 ########################################
-FROM rust:1.75-slim AS builder
+FROM rust:1.82-slim AS builder
 
 ARG SERVICE=logline-id
 
