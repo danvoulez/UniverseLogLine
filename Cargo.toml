@@ -59,6 +59,8 @@ mockall = "0.12"
 test-case = "3.3"
 tempfile = "3.9"
 wiremock = "0.5"
+criterion = { version = "0.5", features = ["async_tokio"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots", "connect"] }
 
 [[bin]]
 name = "logline"
@@ -67,3 +69,8 @@ path = "src/main.rs"
 [lib]
 name = "logline"
 path = "lib.rs"
+
+[[bench]]
+name = "ws_vs_rest"
+path = "tests/benchmarks/ws_vs_rest.rs"
+harness = false
