@@ -8,7 +8,15 @@ license = "MIT"
 repository = "https://github.com/logline/logline"
 
 [workspace]
-members = ["logline-core", "logline-protocol", "logline-id", "logline-timeline", "logline-rules", "logline-engine"]
+members = [
+    "logline-core",
+    "logline-protocol",
+    "logline-id",
+    "logline-timeline",
+    "logline-rules",
+    "logline-engine",
+    "logline-gateway",
+]
 [dependencies]
 # Principais dependências
 serde = { version = "1.0", features = ["derive"] }
@@ -61,6 +69,7 @@ tempfile = "3.9"
 wiremock = "0.5"
 criterion = { version = "0.5", features = ["async_tokio"] }
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots", "connect"] }
+logline-gateway = { path = "logline-gateway" }
 
 [[bin]]
 name = "logline"
