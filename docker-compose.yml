@@ -4,9 +4,9 @@ services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_USER: logline
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: logline
+      POSTGRES_USER: ${POSTGRES_USER:-logline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env file}
+      POSTGRES_DB: ${POSTGRES_DB:-logline}
     ports:
       - "5432:5432"
     volumes:
@@ -23,13 +23,13 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: logline-rules
-        SERVICE_PORT: 8081
+        SERVICE_PORT: 8080
     environment:
-      RUST_LOG: info
+      RUST_LOG: ${RUST_LOG:-info}
     depends_on:
       - postgres
     ports:
-      - "8081:8081"
+      - "8081:8080"
 
   logline-timeline:
     build:
@@ -37,14 +37,14 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: logline-timeline
-        SERVICE_PORT: 8082
+        SERVICE_PORT: 8080
     environment:
-      RUST_LOG: info
-      TIMELINE_DATABASE_URL: postgres://logline:password@postgres:5432/logline
+      RUST_LOG: ${RUST_LOG:-info}
+      TIMELINE_DATABASE_URL: postgres://${POSTGRES_USER:-logline}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-logline}
     depends_on:
       - postgres
     ports:
-      - "8082:8082"
+      - "8082:8080"
 
   logline-engine:
     build:
@@ -52,17 +52,17 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: logline-engine
-        SERVICE_PORT: 8090
+        SERVICE_PORT: 8080
     environment:
-      RUST_LOG: info
-      RULES_URL: http://logline-rules:8081
-      TIMELINE_WS_URL: ws://logline-timeline:8082/ws/service
+      RUST_LOG: ${RUST_LOG:-info}
+      RULES_URL: ${RULES_URL:-http://logline-rules:8080}
+      TIMELINE_WS_URL: ${TIMELINE_WS_URL:-ws://logline-timeline:8080/ws/service}
     depends_on:
       - redis
       - logline-rules
       - logline-timeline
     ports:
-      - "8090:8090"
+      - "8090:8080"
     develop:
       watch:
         - action: sync
@@ -79,18 +79,18 @@ services:
         SERVICE: logline-gateway
         SERVICE_PORT: 8070
     environment:
-      RUST_LOG: info
-      GATEWAY_BIND: 0.0.0.0:8070
-      ENGINE_URL: http://logline-engine:8090
-      RULES_URL: http://logline-rules:8081
-      TIMELINE_URL: http://logline-timeline:8082
-      ID_URL: http://logline-id:8083
-      FEDERATION_URL: http://logline-federation:8084
-      GATEWAY_JWT_SECRET: supersecret
-      GATEWAY_JWT_ISSUER: logline-id
-      GATEWAY_JWT_AUDIENCE: logline
-      GATEWAY_ALLOWED_ORIGINS: "*"
-      GATEWAY_PUBLIC_PATHS: /healthz
+      RUST_LOG: ${RUST_LOG:-info}
+      GATEWAY_BIND: ${GATEWAY_BIND:-0.0.0.0:8070}
+      ENGINE_URL: ${ENGINE_URL:-http://logline-engine:8080}
+      RULES_URL: ${RULES_URL:-http://logline-rules:8080}
+      TIMELINE_URL: ${TIMELINE_URL:-http://logline-timeline:8080}
+      ID_URL: ${ID_URL:-http://logline-id:8080}
+      FEDERATION_URL: ${FEDERATION_URL:-http://logline-federation:8080}
+      GATEWAY_JWT_SECRET: ${GATEWAY_JWT_SECRET:?GATEWAY_JWT_SECRET must be set in .env file}
+      GATEWAY_JWT_ISSUER: ${GATEWAY_JWT_ISSUER:-logline-id}
+      GATEWAY_JWT_AUDIENCE: ${GATEWAY_JWT_AUDIENCE:-logline}
+      GATEWAY_ALLOWED_ORIGINS: ${GATEWAY_ALLOWED_ORIGINS:-*}
+      GATEWAY_PUBLIC_PATHS: ${GATEWAY_PUBLIC_PATHS:-/healthz,/health,/docs}
     depends_on:
       - logline-engine
       - logline-rules
@@ -104,11 +104,11 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: logline-id
-        SERVICE_PORT: 8083
+        SERVICE_PORT: 8080
     environment:
-      RUST_LOG: info
+      RUST_LOG: ${RUST_LOG:-info}
     ports:
-      - "8083:8083"
+      - "8083:8080"
 
   logline-federation:
     build:
@@ -116,11 +116,14 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: logline-federation
-        SERVICE_PORT: 8084
+        SERVICE_PORT: 8080
     environment:
-      RUST_LOG: info
+      RUST_LOG: ${RUST_LOG:-info}
+      FEDERATION_NODE_NAME: ${FEDERATION_NODE_NAME:-local-node}
+      FEDERATION_NETWORK_KEY: ${FEDERATION_NETWORK_KEY:-}
+      FEDERATION_TRUSTED_PEERS: ${FEDERATION_TRUSTED_PEERS:-}
     ports:
-      - "8084:8084"
+      - "8084:8080"
 
 volumes:
   pgdata:

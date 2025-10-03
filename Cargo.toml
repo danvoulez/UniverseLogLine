@@ -16,6 +16,7 @@ members = [
     "logline-rules",
     "logline-engine",
     "logline-gateway",
+    "logline-cli",
 ]
 [dependencies]
 # Principais dependências
@@ -71,9 +72,10 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots", "connect"] }
 logline-gateway = { path = "logline-gateway" }
 
-[[bin]]
-name = "logline"
-path = "src/main.rs"
+# CLI moved to dedicated logline-cli crate
+# [[bin]]
+# name = "logline"
+# path = "src/main.rs"
 
 
 [[bench]]

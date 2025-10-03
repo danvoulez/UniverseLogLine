@@ -243,6 +243,45 @@ LogLine is not an application; it is a foundation. Here are a few examples of th
 *   **Reproducible Scientific Research**: Capture an entire experimental workflow—from data ingestion, to parameter changes, to simulation runs—as a chain of `spans`. The entire experiment becomes a verifiable and re-executable object on the Timeline, solving the crisis of reproducibility in science.
 *   **Verifiable Supply Chains**: Track a product from origin to consumer. Every step—harvest, processing, shipping, delivery—is recorded as a `span` on a shared Timeline, signed by the responsible party, creating an unbreakable chain of custody.
 
+## 🔒 Security & Production Readiness
+
+LogLine Universe is built with security-first principles and production-ready architecture:
+
+### Security Features
+- **🔐 JWT Authentication**: Secure token-based authentication with configurable expiration
+- **✍️ Ed25519 Signatures**: Cryptographic verification for all identities and actions
+- **🏢 Multi-Tenant Isolation**: Complete data separation between organizations
+- **🔒 TLS/HTTPS Support**: Encrypted communication for all external connections
+- **📊 Audit Logging**: Comprehensive logging of all system activities
+- **🛡️ Input Validation**: Robust validation and sanitization of all inputs
+
+### Production Configuration
+- **🔑 Externalized Secrets**: All secrets managed via environment variables
+- **📋 Environment Templates**: Comprehensive `.env.example` for easy setup
+- **🐳 Standardized Ports**: Consistent internal port mapping (8080) across services
+- **🌐 Docker DNS**: Service discovery using Docker's internal DNS
+- **📈 Health Monitoring**: Health check endpoints for all services
+- **🔄 Hot Reload**: Development-friendly hot reload capabilities
+
+### Security Documentation
+- **[Security Guide](docs/security-guide.md)**: Comprehensive security best practices
+- **[SECURITY.md](SECURITY.md)**: Vulnerability reporting and security policy
+- **[Federation Security](docs/federation-service.md)**: Cross-node security model
+
+### Before Production Deployment
+```bash
+# 1. Copy and configure environment variables
+cp .env.example .env
+# Edit .env with your secure values
+
+# 2. Generate strong JWT secret
+openssl rand -base64 32
+
+# 3. Configure TLS certificates
+# 4. Set restrictive CORS origins
+# 5. Enable monitoring and alerting
+```
+
 ## 🗺️ Project Status & Roadmap
 
 The LogLine Universe is an active, open project on a clear path to becoming a new standard for verifiable systems.
