@@ -32,7 +32,7 @@ For each microservice:
 |--------------------|--------------------|----------------|-------|
 | `logline-id`       | `logline-id`       | `8079`         | Default health path `/health`
 | `logline-timeline` | `logline-timeline` | `8080`         | Requires Postgres URL (next step)
-| `logline-engine`   | `logline-engine`   | `8082`         | Set `ENGINE_RULES_PATH` env var if you ship rule files in the image/volume
+| `logline-engine`   | `logline-engine`   | `8082`         | Configure `RULES_URL` to point at the deployed `logline-rules` service |
 
 > ℹ️ Railway applies build args during image build. The default command matches `SERVICE`, so you only need to override `SERVICE_CMD` if you wrap the binary in a custom script.
 
@@ -46,7 +46,7 @@ TIMELINE_DATABASE_URL=${{Postgres.DATABASE_URL}}
 
 Optional variables:
 
-- `ENGINE_RULES_PATH` (engine service) – absolute path to a YAML/JSON rule bundle included in the image or mounted volume.
+- `ENGINE_RULES_URL` (engine service) – overrides the default `RULES_URL` when the engine must contact a private rules endpoint.
 - `TIMELINE_HTTP_BIND`, `ENGINE_HTTP_BIND`, etc., if you need to override the default bind addresses from code (defaults are already `0.0.0.0`).
 
 ## Step 5: Run Database Migrations
@@ -76,7 +76,7 @@ After completing the steps you will have:
 
 - ✅ PostgreSQL + three LogLine microservices running from the same Dockerfile
 - ✅ Timeline ledger isolated from rule execution
-- ✅ Engine service loading and applying rules locally when `ENGINE_RULES_PATH` is provided
+- ✅ Engine service delegating rule evaluation via HTTP when `RULES_URL` está configurado
 
 ## 📊 Service Architecture
 
@@ -96,7 +96,7 @@ After completing the steps you will have:
 
 - **Build failures**: confirm the correct `SERVICE` build arg, inspect Railway build logs for Cargo errors.
 - **Connection issues**: ensure `TIMELINE_DATABASE_URL` is present and migrations ran successfully.
-- **Rule evaluation**: verify the engine has access to the rule files referenced by `ENGINE_RULES_PATH`.
+- **Rule evaluation**: verify the engine can reach the rules endpoint defined by `RULES_URL`/`ENGINE_RULES_URL`.
 
 ---
 

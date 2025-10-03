@@ -16,19 +16,19 @@ use crate::config::SecurityConfig;
 /// Contexto autenticado extraído do token JWT do cliente.
 #[derive(Debug, Clone)]
 pub struct AuthContext {
-    pub subject: String,
-    pub tenant: Option<String>,
-    pub scopes: Vec<String>,
+    pub user_id: String,
+    pub tenant_id: Option<String>,
+    pub roles: Vec<String>,
     pub issued_at: Option<i64>,
     pub expires_at: Option<i64>,
 }
 
 impl AuthContext {
-    fn scopes_header(&self) -> Option<String> {
-        if self.scopes.is_empty() {
+    fn roles_header(&self) -> Option<String> {
+        if self.roles.is_empty() {
             None
         } else {
-            Some(self.scopes.join(" "))
+            Some(self.roles.join(" "))
         }
     }
 }
@@ -121,7 +121,7 @@ impl SecurityState {
         let data = decode::<AuthClaims>(token, &self.decoding_key, &self.validation)
             .map_err(|err| SecurityError::InvalidToken(err.to_string()))?;
         let claims = data.claims;
-        let scopes = claims
+        let roles = claims
             .scope
             .unwrap_or_default()
             .split_whitespace()
@@ -129,9 +129,9 @@ impl SecurityState {
             .collect();
 
         Ok(AuthContext {
-            subject: claims.sub,
-            tenant: claims.tenant,
-            scopes,
+            user_id: claims.sub,
+            tenant_id: claims.tenant,
+            roles,
             issued_at: claims.iat,
             expires_at: claims.exp,
         })
@@ -143,28 +143,28 @@ impl SecurityState {
         auth: &AuthContext,
     ) -> reqwest::RequestBuilder {
         if let Some(token) = &self.config.service_token {
-            builder = builder.header("X-Logline-Service-Token", token.as_str());
+            builder = builder.header("X-Service-Token", token.as_str());
         }
 
-        if let Err(err) = HeaderValue::from_str(&auth.subject) {
-            warn!(subject = %auth.subject, ?err, "valor inválido para header X-Logline-Subject");
+        if let Err(err) = HeaderValue::from_str(&auth.user_id) {
+            warn!(user_id = %auth.user_id, ?err, "valor inválido para header X-User-ID");
         } else {
-            builder = builder.header("X-Logline-Subject", auth.subject.as_str());
+            builder = builder.header("X-User-ID", auth.user_id.as_str());
         }
 
-        if let Some(tenant) = &auth.tenant {
+        if let Some(tenant) = &auth.tenant_id {
             if let Err(err) = HeaderValue::from_str(tenant) {
-                warn!(tenant = %tenant, ?err, "valor inválido para header X-Logline-Tenant");
+                warn!(tenant = %tenant, ?err, "valor inválido para header X-Tenant-ID");
             } else {
-                builder = builder.header("X-Logline-Tenant", tenant.as_str());
+                builder = builder.header("X-Tenant-ID", tenant.as_str());
             }
         }
 
-        if let Some(scopes) = auth.scopes_header() {
-            if let Err(err) = HeaderValue::from_str(&scopes) {
-                warn!(scopes = %scopes, ?err, "valor inválido para header X-Logline-Scopes");
+        if let Some(roles) = auth.roles_header() {
+            if let Err(err) = HeaderValue::from_str(&roles) {
+                warn!(roles = %roles, ?err, "valor inválido para header X-User-Roles");
             } else {
-                builder = builder.header("X-Logline-Scopes", scopes);
+                builder = builder.header("X-User-Roles", roles);
             }
         }
 
@@ -202,7 +202,7 @@ pub async fn enforce_auth<B>(
         }
     };
 
-    info!(subject = %context.subject, path, "requisição autenticada");
+    info!(user_id = %context.user_id, path, "requisição autenticada");
     request.extensions_mut().insert(context);
 
     Ok(next.run(request).await)
