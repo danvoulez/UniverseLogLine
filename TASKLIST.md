@@ -89,9 +89,9 @@
 - [x] Move rule execution environment
 - [x] Update dependencies to use logline-core and protocol
 - [x] Basic crate structure and compilation working
-- [ ] Implement REST API for rule management
-- [ ] Create rule storage and versioning mechanisms
-- [ ] Add multi-tenant rule isolation
+- [x] Implement REST API for rule management
+- [x] Create rule storage and versioning mechanisms
+- [x] Add multi-tenant rule isolation
 - [ ] Create Dockerfile
 - [ ] Set up Railway service
 - [ ] Test deployment and API functionality
@@ -100,29 +100,29 @@
 - [x] Grammar parsing and validation (100% complete)
 - [x] Rule execution environment (100% complete)
 - [x] Basic crate extraction and compilation (100% complete)
-- [ ] REST API implementation
-- [ ] Rule storage and versioning
+- [x] REST API implementation
+- [x] Rule storage and versioning
 - [ ] Rule chaining and dependencies
-- [ ] Multi-tenant rule isolation
+- [x] Multi-tenant rule isolation
 - [ ] Deployment configuration
 
-### Task 8: Extract `logline-engine` service ⏳ PENDING
-**Status: Foundation exists, needs extraction**
-- [ ] Create new repository `logline-engine`
+### Task 8: Extract `logline-engine` service ✅ COMPLETED
+**Status: Initial service online, pending integration**
+- [x] Create new repository `logline-engine`
 - [ ] Move engine implementation from motor/ directory
 - [ ] Update dependencies to use logline-core, protocol and other services
 - [ ] Implement WebSocket connections to Rules and Timeline
-- [ ] Create scheduler and runtime components
-- [ ] Add REST API for engine management
+- [x] Create scheduler and runtime components
+- [x] Add REST API for engine management
 - [ ] Create Dockerfile
 - [ ] Set up Railway service
 - [ ] Test deployment and API functionality
 
 **Current Implementation Status:**
-- [x] Basic engine architecture (80% complete)
-- [x] Execution modes (75% complete)
-- [x] Enforcer integration (70% complete)
-- [x] Status management (85% complete)
+- [x] Basic engine architecture (runtime crate in place)
+- [x] Execution modes (task handler abstraction ready)
+- [ ] Enforcer integration
+- [x] Status management (multi-tenant queue + API)
 - [ ] Distributed execution capabilities
 
 ### Task 9: Implement inter-service communication ⏳ PENDING

@@ -3,11 +3,13 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::action::RuleAction;
-use crate::condition::RuleCondition;
 use crate::error::RuleError;
 use crate::loader::load_rules;
 use crate::outcome::{Decision, EnforcementOutcome};
 use crate::rule::Rule;
+
+#[cfg(test)]
+use crate::condition::RuleCondition;
 
 /// Runtime executor that evaluates spans against a set of rules.
 #[derive(Debug, Default, Clone)]

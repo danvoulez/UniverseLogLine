@@ -17,6 +17,8 @@ pub enum RuleError {
     Parse { path: String, message: String },
     #[error("duplicate rule identifier detected: {id}")]
     DuplicateRule { id: String },
+    #[error("rule not found: {0}")]
+    NotFound(String),
 }
 
 impl RuleError {
