@@ -1,14 +1,18 @@
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use futures::{SinkExt, StreamExt};
+use logline_core::websocket::{ServiceMessage, WebSocketEnvelope};
 use logline_protocol::timeline::Span;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use tokio::sync::oneshot;
-use tracing::info;
+use tracing::{debug, info, warn};
 
-use crate::{EnforcementOutcome, Rule, RuleEngine, RuleStore};
+use crate::{Decision, EnforcementOutcome, Rule, RuleEngine, RuleStore};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuleDocument {
@@ -83,6 +87,8 @@ struct RuleServiceState {
 pub struct RuleServiceConfig {
     #[serde(default = "default_bind_address")]
     pub bind_address: String,
+    #[serde(default)]
+    pub engine_ws_url: Option<String>,
 }
 
 fn default_bind_address() -> String {
@@ -93,6 +99,7 @@ impl Default for RuleServiceConfig {
     fn default() -> Self {
         Self {
             bind_address: default_bind_address(),
+            engine_ws_url: None,
         }
     }
 }
@@ -120,6 +127,7 @@ impl RuleApiBuilder {
                 get(get_rule).put(disable_rule),
             )
             .route("/tenants/:tenant/evaluate", post(evaluate_span))
+            .route("/ws/service", get(service_ws_upgrade))
             .with_state(self.state)
     }
 
@@ -128,6 +136,8 @@ impl RuleApiBuilder {
         let (tx, rx) = oneshot::channel();
         let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
         let state = self.state.clone();
+
+        crate::ws_client::start_service_mesh(&config);
 
         tokio::spawn(async move {
             info!(address = %config.bind_address, "starting rule service");
@@ -225,6 +235,151 @@ async fn evaluate_span(
     let mut span = payload.span;
     let outcome = engine.apply(&mut span);
     Json(EvaluationResponse::from(outcome))
+}
+
+async fn service_ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(state): State<RuleServiceState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        if let Err(err) = handle_service_socket(socket, state).await {
+            warn!(?err, "rules service websocket closed with error");
+        }
+    })
+}
+
+async fn handle_service_socket(socket: WebSocket, state: RuleServiceState) -> anyhow::Result<()> {
+    let (mut sender, mut receiver) = socket.split();
+    let hello = ServiceMessage::ServiceHello {
+        sender: "logline-rules".into(),
+        capabilities: vec!["rule_eval".into(), "rule_updates".into()],
+    };
+    let hello_message = WebSocketEnvelope::from_service_message(&hello)
+        .and_then(|envelope| envelope.to_message())
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+    sender
+        .send(hello_message)
+        .await
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+    while let Some(message) = receiver.next().await {
+        match message {
+            Ok(Message::Text(text)) => {
+                process_service_message(&state, Message::Text(text), &mut sender).await?;
+            }
+            Ok(Message::Binary(bytes)) => {
+                process_service_message(&state, Message::Binary(bytes), &mut sender).await?;
+            }
+            Ok(Message::Ping(payload)) => {
+                sender
+                    .send(Message::Pong(payload))
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            }
+            Ok(Message::Pong(_)) => {}
+            Ok(Message::Close(_)) => break,
+            Err(err) => {
+                return Err(anyhow::anyhow!(err.to_string()));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn process_service_message(
+    state: &RuleServiceState,
+    message: Message,
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+) -> anyhow::Result<()> {
+    let envelope =
+        WebSocketEnvelope::from_message(message).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    let payload = envelope
+        .into_service_message()
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+    match payload {
+        ServiceMessage::RuleEvaluationRequest {
+            request_id,
+            tenant_id,
+            span,
+        } => {
+            let mut span: Span =
+                serde_json::from_value(span).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            let engine = state.store.engine_for(&tenant_id);
+            let outcome = engine.apply(&mut span);
+            let response = ServiceMessage::RuleExecutionResult {
+                result_id: request_id.clone(),
+                success: !outcome.is_reject(),
+                output: outcome_to_value(&outcome, &span),
+            };
+
+            let message = WebSocketEnvelope::from_service_message(&response)
+                .and_then(|envelope| envelope.to_message())
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+            sender
+                .send(message)
+                .await
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        }
+        ServiceMessage::HealthCheckPing => {
+            let pong = ServiceMessage::HealthCheckPong;
+            let message = WebSocketEnvelope::from_service_message(&pong)
+                .and_then(|envelope| envelope.to_message())
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            sender
+                .send(message)
+                .await
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        }
+        ServiceMessage::ServiceHello {
+            sender: peer,
+            capabilities,
+        } => {
+            info!(%peer, ?capabilities, "service peer connected to rules");
+        }
+        ServiceMessage::HealthCheckPong => {
+            debug!("received health check pong from peer");
+        }
+        ServiceMessage::ConnectionLost { peer } => {
+            warn!(%peer, "peer reported connection lost");
+        }
+        other => {
+            debug!(message = ?other, "unhandled service message");
+        }
+    }
+
+    Ok(())
+}
+
+fn outcome_to_value(outcome: &EnforcementOutcome, span: &Span) -> Value {
+    let metadata = metadata_updates_to_map(&outcome.metadata_updates);
+    json!({
+        "decision": decision_to_value(&outcome.decision),
+        "applied_rules": outcome.applied_rules.clone(),
+        "notes": outcome.notes.clone(),
+        "tags": outcome.added_tags.clone(),
+        "metadata_updates": metadata,
+        "span": span,
+    })
+}
+
+fn metadata_updates_to_map(updates: &[(String, Value)]) -> Value {
+    let mut map = Map::new();
+    for (key, value) in updates {
+        map.insert(key.clone(), value.clone());
+    }
+    Value::Object(map)
+}
+
+fn decision_to_value(decision: &Decision) -> Value {
+    match decision {
+        Decision::Allow => json!({"state": "allow"}),
+        Decision::Reject { reason } => json!({"state": "reject", "reason": reason}),
+        Decision::Simulate { note } => json!({"state": "simulate", "note": note}),
+    }
 }
 
 fn rule_not_found(id: &str) -> (StatusCode, Json<ErrorResponse>) {

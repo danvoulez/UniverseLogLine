@@ -1,7 +1,8 @@
 mod repository;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
@@ -15,6 +16,7 @@ use hyper::Error as HyperError;
 use logline_core::config::CoreConfig;
 use logline_core::errors::LogLineError;
 use logline_core::logging;
+use logline_core::websocket::{ServiceMessage, WebSocketEnvelope};
 use logline_protocol::timeline::{
     Span, SpanStatus, SpanType, TimelineEntry, TimelineQuery, Visibility,
 };
@@ -23,6 +25,7 @@ use repository::TimelineRepository;
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -42,11 +45,13 @@ async fn main() -> Result<(), ServerError> {
     let repository = TimelineRepository::from_config(&config).await?;
     let rule_engine = load_rule_engine_from_env()?;
     let (tx, _rx) = broadcast::channel(128);
+    let service_bus = ServiceBus::new();
 
     let state = AppState {
         repository,
         broadcaster: tx,
         rules: rule_engine,
+        service_bus,
     };
 
     let app = Router::new()
@@ -54,6 +59,7 @@ async fn main() -> Result<(), ServerError> {
         .route("/v1/spans", get(list_spans).post(create_span))
         .route("/v1/spans/:id", get(get_span))
         .route("/ws", get(ws_upgrade))
+        .route("/ws/service", get(service_ws_upgrade))
         .with_state(state.clone());
 
     let listener = TcpListener::bind(bind_addr).await?;
@@ -112,6 +118,7 @@ struct AppState {
     repository: TimelineRepository,
     broadcaster: broadcast::Sender<TimelineEntry>,
     rules: Option<Arc<RuleEngine>>,
+    service_bus: ServiceBus,
 }
 
 impl AppState {
@@ -124,6 +131,68 @@ impl AppState {
     }
 }
 
+#[derive(Clone, Default)]
+struct ServiceBus {
+    inner: Arc<Mutex<HashMap<Uuid, mpsc::UnboundedSender<ServiceMessage>>>>,
+}
+
+impl ServiceBus {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn register(&self) -> (Uuid, mpsc::UnboundedReceiver<ServiceMessage>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let id = Uuid::new_v4();
+        let mut guard = self
+            .inner
+            .lock()
+            .expect("service bus mutex poisoned while registering peer");
+        guard.insert(id, tx);
+        (id, rx)
+    }
+
+    fn unregister(&self, id: Uuid) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.remove(&id);
+        }
+    }
+
+    fn send_to(&self, id: &Uuid, message: ServiceMessage) -> bool {
+        match self.inner.lock() {
+            Ok(mut guard) => {
+                if let Some(sender) = guard.get(id) {
+                    if sender.send(message).is_err() {
+                        guard.remove(id);
+                        return false;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn broadcast(&self, message: ServiceMessage) {
+        let mut stale = Vec::new();
+        if let Ok(guard) = self.inner.lock() {
+            for (id, sender) in guard.iter() {
+                if sender.send(message.clone()).is_err() {
+                    stale.push(*id);
+                }
+            }
+        }
+
+        if let Ok(mut guard) = self.inner.lock() {
+            for id in stale {
+                guard.remove(&id);
+            }
+        }
+    }
+}
+
 type AppResult<T> = Result<T, AppError>;
 
 async fn create_span(
@@ -131,6 +200,7 @@ async fn create_span(
     Json(payload): Json<CreateSpanRequest>,
 ) -> AppResult<Json<TimelineEntry>> {
     let mut span = payload.into_span();
+    let span_snapshot = span.clone();
 
     if let Some(engine) = state.rule_engine() {
         let outcome = engine.apply(&mut span);
@@ -173,6 +243,30 @@ async fn create_span(
         warn!(?err, "failed to broadcast new span");
     }
 
+    if let Ok(span_json) = serde_json::to_value(&span_snapshot) {
+        let metadata = match serde_json::to_value(&entry) {
+            Ok(entry_json) => serde_json::json!({ "timeline_entry": entry_json }),
+            Err(err) => {
+                warn!(
+                    ?err,
+                    "failed to encode timeline entry for service broadcast"
+                );
+                serde_json::Value::Null
+            }
+        };
+
+        let message = ServiceMessage::SpanCreated {
+            span_id: span_snapshot.id.to_string(),
+            tenant_id: span_snapshot.tenant_id.clone(),
+            span: span_json,
+            metadata,
+        };
+
+        state.service_bus.broadcast(message);
+    } else {
+        warn!("failed to serialise span snapshot for service broadcast");
+    }
+
     Ok(Json(entry))
 }
 
@@ -201,6 +295,17 @@ async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
     ws.on_upgrade(move |socket| async move {
         if let Err(err) = handle_socket(socket, state).await {
             warn!(?err, "timeline websocket closed with error");
+        }
+    })
+}
+
+async fn service_ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| async move {
+        if let Err(err) = handle_service_socket(socket, state).await {
+            warn!(?err, "timeline service websocket closed with error");
         }
     })
 }
@@ -235,6 +340,103 @@ async fn handle_socket(socket: WebSocket, state: AppState) -> AppResult<()> {
             Err(err) => {
                 warn!(?err, "failed to encode timeline entry");
             }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_service_socket(socket: WebSocket, state: AppState) -> AppResult<()> {
+    let (mut sender, mut receiver) = socket.split();
+    let (peer_id, mut outbound) = state.service_bus.register();
+    let service_bus = state.service_bus.clone();
+
+    let hello = ServiceMessage::ServiceHello {
+        sender: "logline-timeline".into(),
+        capabilities: vec!["timeline_stream".into(), "span_broadcast".into()],
+    };
+    let hello_message = WebSocketEnvelope::from_service_message(&hello)
+        .and_then(|envelope| envelope.to_message())
+        .map_err(|err| AppError::internal(format!("failed to encode hello message: {err}")))?;
+
+    sender
+        .send(hello_message)
+        .await
+        .map_err(|err| AppError::internal(format!("failed to send hello message: {err}")))?;
+
+    loop {
+        tokio::select! {
+            Some(message) = outbound.recv() => {
+                let payload = WebSocketEnvelope::from_service_message(&message)
+                    .and_then(|envelope| envelope.to_message())
+                    .map_err(|err| AppError::internal(format!("failed to encode outbound message: {err}")))?;
+
+                if let Err(err) = sender.send(payload).await {
+                    service_bus.unregister(peer_id);
+                    return Err(AppError::internal(format!("failed to deliver outbound service message: {err}")));
+                }
+            }
+            incoming = receiver.next() => {
+                match incoming {
+                    Some(Ok(Message::Text(text))) => {
+                        handle_service_payload(&service_bus, peer_id, Message::Text(text))?;
+                    }
+                    Some(Ok(Message::Binary(bytes))) => {
+                        handle_service_payload(&service_bus, peer_id, Message::Binary(bytes))?;
+                    }
+                    Some(Ok(Message::Ping(payload))) => {
+                        if let Err(err) = sender.send(Message::Pong(payload)).await {
+                            service_bus.unregister(peer_id);
+                            return Err(AppError::internal(format!("failed to respond to ping: {err}")));
+                        }
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Err(err)) => {
+                        service_bus.unregister(peer_id);
+                        return Err(AppError::internal(format!("service websocket error: {err}")));
+                    }
+                    None => break,
+                }
+            }
+        }
+    }
+
+    service_bus.unregister(peer_id);
+    Ok(())
+}
+
+fn handle_service_payload(
+    bus: &ServiceBus,
+    peer_id: Uuid,
+    message: Message,
+) -> Result<(), AppError> {
+    let envelope = WebSocketEnvelope::from_message(message)
+        .map_err(|err| AppError::internal(format!("invalid service payload: {err}")))?;
+    let service_message = envelope
+        .into_service_message()
+        .map_err(|err| AppError::internal(format!("failed to decode service message: {err}")))?;
+
+    match service_message {
+        ServiceMessage::HealthCheckPing => {
+            if !bus.send_to(&peer_id, ServiceMessage::HealthCheckPong) {
+                warn!(%peer_id, "failed to respond to health check ping");
+            }
+        }
+        ServiceMessage::HealthCheckPong => {
+            debug!(%peer_id, "received health check pong");
+        }
+        ServiceMessage::ServiceHello {
+            sender,
+            capabilities,
+        } => {
+            info!(%peer_id, %sender, ?capabilities, "service peer connected");
+        }
+        ServiceMessage::ConnectionLost { peer } => {
+            debug!(%peer_id, %peer, "received connection lost notification");
+        }
+        other => {
+            info!(%peer_id, message = ?other, "received service message");
         }
     }
 

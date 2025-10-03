@@ -14,6 +14,7 @@ mod outcome;
 mod rule;
 mod service;
 mod store;
+mod ws_client;
 
 pub use action::RuleAction;
 pub use condition::{FieldPath, RuleCondition};
