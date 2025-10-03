@@ -1,6 +1,6 @@
 # Convenience Make targets for LogLine testing, fuzzing, benchmarking and docs.
 
-.PHONY: test fuzz bench doc
+.PHONY: test fuzz bench doc gateway
 
 test:
 	cargo test
@@ -13,3 +13,6 @@ bench:
 
 doc:
 	cargo doc --open
+
+gateway:
+	cargo run -p logline-gateway

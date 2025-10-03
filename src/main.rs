@@ -1,5 +1,5 @@
+use base64::{engine::general_purpose, Engine as _};
 use clap::{Parser, Subcommand};
-use base64::{Engine as _, engine::general_purpose};
 
 use logline_core::identity::LogLineKeyPair;
 
@@ -30,8 +30,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Commands::GenerateId { node_name } => {
             let keypair = LogLineKeyPair::generate(&node_name, None, None, false);
-            println!("Generated LogLine ID: {}", keypair.id.to_json().unwrap_or_else(|_| "Error serializing ID".to_string()));
-            println!("Public Key: {}", general_purpose::STANDARD.encode(keypair.public_key_bytes()));
+            println!(
+                "Generated LogLine ID: {}",
+                keypair
+                    .id
+                    .to_json()
+                    .unwrap_or_else(|_| "Error serializing ID".to_string())
+            );
+            println!(
+                "Public Key: {}",
+                general_purpose::STANDARD.encode(keypair.public_key_bytes())
+            );
         }
         Commands::Version => {
             println!("LogLine Universe v{}", env!("CARGO_PKG_VERSION"));
