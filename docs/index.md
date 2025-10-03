@@ -1,64 +1,32 @@
-# LogLine Documentation
+# LogLine Inter-Service Protocol
 
-This index provides a comprehensive list of all documentation for the LogLine system.
+O protocolo LogLine define a comunicação entre Engine, Rules, Timeline e serviços auxiliares. Ele combina WebSockets para mensagens em tempo real e REST para operações idempotentes, garantindo comunicação resiliente em ambientes híbridos.
 
-## Core Documentation
+## Camadas
 
-- [Architecture](./architecture.md) - System architecture and microservices implementation
-- [Vision](./vision.md) - Core concept, philosophy, and goals of the LogLine system
-- [Naming Conventions](./naming-conventions.md) - Standardized naming conventions for the system
+| Camada | Objetivo | Tecnologias |
+| ------ | -------- | ----------- |
+| Transporte | Conexões persistentes entre serviços | WebSocket (tokio-tungstenite) |
+| Envelope | Serialização de mensagens semânticas | `serde`, `serde_json` |
+| Aplicação | Rotas REST complementares | `axum`, `reqwest` |
+| Observabilidade | Telemetria de tráfego | `tracing` |
 
-## Implementation Plans
+## Componentes Principais
 
-- [Modularization Plan](./modularization-plan.md) - Step-by-step plan for transforming the monolithic system into microservices
-- [ID Refactoring Plan](./id-refactoring-plan.md) - Specific plan for extracting the ID service
-- [Railway Deployment](./railway-deployment.md) - Guide for deploying the system on Railway
+- **Engine**: recebe spans, agenda execuções e coordena regras.
+- **Rules**: avalia spans com regras declarativas e retorna resultados.
+- **Timeline**: persiste spans e eventos relevantes.
+- **Fallback REST**: endpoints para agendamento quando o mesh WebSocket está indisponível.
 
-## Service Documentation
+## Princípios
 
-- [logline-id Service](./logline-id-service.md) - Comprehensive documentation for the ID service
-- [logline-id README](./logline-id-README.md) - README template for the logline-id repository
-- [logline-timeline README](./logline-timeline-README.md) - README template for the logline-timeline repository
+1. **Idempotência**: mensagens são identificadas por `request_id`/`result_id` para evitar duplicidades.
+2. **Observabilidade**: cada mensagem gera eventos de tracing e métricas.
+3. **Resiliência**: reconexões exponenciais e fallback REST garantem continuidade.
+4. **Compatibilidade**: o schema `ServiceMessage` versionado permite evolução compatível.
 
-## Legacy Documentation
+## Próximos Passos
 
-The following documents are from the monolithic system and may need updating:
-
-- [Multi-tenant Timeline](./multi-tenant-timeline.md)
-- [Timeline Integration Summary](./timeline-integration-summary.md)
-- [ID Integration Examples](./id-integration-examples.md)
-- [ID Refactoring Details](./id-refactoring-details.md)
-- [Enforcement Implementation](./enforcement-implementado.md)
-- [Enforcement README](./enforcement-readme.md)
-- [GitHub Push Guide](./github-push-guide.md)
-- [Structure](./structure.md)
-- [Projeto LogLine](./projeto-logline.md)
-
-## Development Resources
-
-- To-do list: See the project task list for implementation status
-- GitHub repositories: All service repositories are available under the `logline` organization
-- Client libraries: Each service provides client libraries for integration
-
-## Getting Started
-
-To get started with developing the LogLine system:
-
-1. Review the [Architecture](./architecture.md) document
-2. Follow the [Modularization Plan](./modularization-plan.md)
-3. Set up the development environment for each service
-4. Follow the [Naming Conventions](./naming-conventions.md) for consistency
-
-## Contributing
-
-We welcome contributions to both the codebase and documentation. Please follow these steps:
-
-1. Follow the naming conventions and architectural principles
-2. Create a branch for your changes
-3. Submit a pull request with a clear description of your changes
-4. Ensure tests pass for any code changes
-5. Update documentation as needed
-
-## Documentation Maintenance
-
-This documentation is maintained by the LogLine team. If you find any inconsistencies or have suggestions for improvements, please submit an issue or pull request.
+- Leia [overview.md](overview.md) para entender a motivação do modelo híbrido.
+- Consulte [envelope.md](envelope.md) para detalhes do schema `ServiceMessage`.
+- Execute os testes descritos em [testing.md](testing.md) para validar integrações.
