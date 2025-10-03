@@ -6,7 +6,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use futures::{SinkExt, StreamExt};
 use logline_core::websocket::{ServiceMessage, WebSocketEnvelope};
-use logline_gateway::config::{GatewayConfig, ServiceUrls};
+use logline_gateway::config::{GatewayConfig, ResilienceConfig, SecurityConfig, ServiceUrls};
 use logline_gateway::start_gateway;
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -247,6 +247,31 @@ async fn handle_flaky_connection(
     Ok(())
 }
 
+fn security_config_for_tests() -> SecurityConfig {
+    SecurityConfig {
+        jwt_secret: "test-secret".into(),
+        jwt_issuer: "tests".into(),
+        jwt_audience: "tests".into(),
+        rate_limit_per_minute: 10_000,
+        max_concurrent_requests: 256,
+        cors_allowed_origins: vec!["*".into()],
+        cors_allow_credentials: false,
+        service_token: None,
+        public_paths: vec!["/healthz".into()],
+    }
+}
+
+fn resilience_config_for_tests() -> ResilienceConfig {
+    ResilienceConfig {
+        request_timeout: Duration::from_secs(5),
+        circuit_breaker_threshold: 5,
+        circuit_breaker_reset: Duration::from_secs(1),
+        retry_attempts: 1,
+        retry_backoff: Duration::from_millis(50),
+        dead_letter_capacity: 32,
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rest_proxy_forwards_engine_ping() -> anyhow::Result<()> {
     let engine_service = spawn_http_service(
@@ -265,6 +290,9 @@ async fn rest_proxy_forwards_engine_ping() -> anyhow::Result<()> {
         timeline: ServiceUrls::new("timeline", "logline-timeline", rest_base.clone(), None),
         identity: ServiceUrls::new("id", "logline-id", rest_base.clone(), None),
         federation: ServiceUrls::new("federation", "logline-federation", rest_base.clone(), None),
+        security: security_config_for_tests(),
+        resilience: resilience_config_for_tests(),
+        tls: None,
     };
 
     let gateway = start_gateway(config).await?;
@@ -308,6 +336,9 @@ async fn websocket_span_created_forwarded_to_rules() -> anyhow::Result<()> {
         ),
         identity: ServiceUrls::new("id", "logline-id", rest_base.clone(), None),
         federation: ServiceUrls::new("federation", "logline-federation", rest_base.clone(), None),
+        security: security_config_for_tests(),
+        resilience: resilience_config_for_tests(),
+        tls: None,
     };
 
     let gateway = start_gateway(config).await?;
@@ -378,6 +409,9 @@ async fn health_check_reports_services_and_mesh() -> anyhow::Result<()> {
         ),
         identity: ServiceUrls::new("id", "logline-id", rest_base.clone(), None),
         federation: ServiceUrls::new("federation", "logline-federation", rest_base.clone(), None),
+        security: security_config_for_tests(),
+        resilience: resilience_config_for_tests(),
+        tls: None,
     };
 
     let gateway = start_gateway(config).await?;
@@ -431,6 +465,9 @@ async fn mesh_reconnects_to_flaky_peer() -> anyhow::Result<()> {
         ),
         identity: ServiceUrls::new("id", "logline-id", rest_base.clone(), None),
         federation: ServiceUrls::new("federation", "logline-federation", rest_base.clone(), None),
+        security: security_config_for_tests(),
+        resilience: resilience_config_for_tests(),
+        tls: None,
     };
 
     let gateway = start_gateway(config).await?;

@@ -1,27 +1,40 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::{OriginalUri, State};
 use axum::http::{self, HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
 use axum::routing::any;
-use axum::Router;
+use axum::{Extension, Router};
 use http_body_util::BodyExt;
-use tracing::{debug, instrument, warn};
+use tokio::time::sleep;
+use tracing::{instrument, warn};
 
 use crate::discovery::ServiceDiscovery;
+use crate::resilience::ResilienceState;
+use crate::security::{AuthContext, SecurityState};
 
 #[derive(Clone)]
 pub struct RestProxyState {
     client: reqwest::Client,
     targets: HashMap<String, String>,
+    security: Arc<SecurityState>,
+    resilience: ResilienceState,
 }
 
 impl RestProxyState {
-    pub fn new(client: reqwest::Client, discovery: &ServiceDiscovery) -> Self {
+    pub fn new(
+        client: reqwest::Client,
+        discovery: &ServiceDiscovery,
+        security: Arc<SecurityState>,
+        resilience: ResilienceState,
+    ) -> Self {
         Self {
             client,
             targets: discovery.rest_targets(),
+            security,
+            resilience,
         }
     }
 
@@ -75,6 +88,7 @@ pub fn router(state: RestProxyState) -> Router {
 #[instrument(skip_all, fields(method = tracing::field::Empty, service = tracing::field::Empty))]
 async fn proxy_request(
     State(state): State<RestProxyState>,
+    Extension(auth): Extension<AuthContext>,
     method: Method,
     headers: HeaderMap,
     OriginalUri(original_uri): OriginalUri,
@@ -84,10 +98,70 @@ async fn proxy_request(
     tracing::Span::current().record("method", &tracing::field::display(&method));
     tracing::Span::current().record("service", &tracing::field::display(&service_key));
 
+    state.resilience.before_request(&service_key).await?;
+
     let req_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
         .map_err(|_| StatusCode::BAD_REQUEST)?;
-    let mut request_builder = state.client.request(req_method, &target_url);
+    let forwarded_headers = build_forward_headers(&headers)?;
 
+    let body_bytes = body
+        .collect()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?
+        .to_bytes();
+    let body_vec = body_bytes.to_vec();
+
+    let max_retries = state.resilience.config().retry_attempts;
+    let mut attempt = 0u32;
+
+    loop {
+        let mut builder = state.client.request(req_method.clone(), &target_url);
+        for (name, value) in &forwarded_headers {
+            builder = builder.header(name.clone(), value.clone());
+        }
+
+        if !body_vec.is_empty() {
+            builder = builder.body(body_vec.clone());
+        }
+
+        builder = state.security.apply_outbound_headers(builder, &auth);
+
+        let response = builder.send().await;
+        match response {
+            Ok(response) => {
+                state.resilience.record_success(&service_key).await;
+                return convert_response(response).await;
+            }
+            Err(err) => {
+                let store_dead_letter = attempt >= max_retries;
+                state
+                    .resilience
+                    .record_failure(
+                        &service_key,
+                        &target_url,
+                        &err.to_string(),
+                        body_vec.len(),
+                        store_dead_letter,
+                    )
+                    .await;
+
+                warn!(%service_key, ?err, attempt, "falha ao encaminhar requisição REST");
+                if attempt >= max_retries {
+                    return Err(StatusCode::BAD_GATEWAY);
+                }
+
+                attempt += 1;
+                let delay = state.resilience.backoff_for_attempt(attempt);
+                sleep(delay).await;
+            }
+        }
+    }
+}
+
+fn build_forward_headers(
+    headers: &HeaderMap,
+) -> Result<Vec<(reqwest::header::HeaderName, reqwest::header::HeaderValue)>, StatusCode> {
+    let mut result = Vec::new();
     for (name, value) in headers.iter() {
         if name == http::header::HOST || name == http::header::CONTENT_LENGTH {
             continue;
@@ -97,25 +171,12 @@ async fn proxy_request(
             .map_err(|_| StatusCode::BAD_REQUEST)?;
         let header_value = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
             .map_err(|_| StatusCode::BAD_REQUEST)?;
-        request_builder = request_builder.header(header_name, header_value);
+        result.push((header_name, header_value));
     }
+    Ok(result)
+}
 
-    let body_bytes = body
-        .collect()
-        .await
-        .map_err(|_| StatusCode::BAD_GATEWAY)?
-        .to_bytes();
-    if !body_bytes.is_empty() {
-        request_builder = request_builder.body(body_bytes.clone());
-    }
-
-    debug!(%target_url, "forwarding REST request");
-
-    let response = request_builder.send().await.map_err(|err| {
-        warn!(%service_key, ?err, "falha ao encaminhar requisição REST");
-        StatusCode::BAD_GATEWAY
-    })?;
-
+async fn convert_response(response: reqwest::Response) -> Result<Response, StatusCode> {
     let status =
         StatusCode::from_u16(response.status().as_u16()).map_err(|_| StatusCode::BAD_GATEWAY)?;
     let mut builder = Response::builder().status(status);

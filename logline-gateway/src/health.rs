@@ -8,6 +8,7 @@ use tracing::debug;
 use logline_core::websocket::ServiceMeshClientHandle;
 
 use crate::discovery::{ServiceDiscovery, ServiceEndpoint};
+use crate::resilience::ResilienceState;
 
 #[derive(Clone)]
 pub struct HealthState {
@@ -15,6 +16,7 @@ pub struct HealthState {
     endpoints: Vec<ServiceEndpoint>,
     mesh_handle: ServiceMeshClientHandle,
     expected_mesh: Vec<String>,
+    resilience: ResilienceState,
 }
 
 impl HealthState {
@@ -22,6 +24,7 @@ impl HealthState {
         client: reqwest::Client,
         discovery: &ServiceDiscovery,
         mesh_handle: ServiceMeshClientHandle,
+        resilience: ResilienceState,
     ) -> Self {
         let endpoints = discovery.all();
         let expected_mesh = endpoints
@@ -35,6 +38,7 @@ impl HealthState {
             endpoints,
             mesh_handle,
             expected_mesh,
+            resilience,
         }
     }
 }
@@ -55,10 +59,17 @@ struct MeshHealth {
 }
 
 #[derive(Serialize)]
+struct ResilienceStatus {
+    open_circuits: Vec<String>,
+    dead_letters: usize,
+}
+
+#[derive(Serialize)]
 struct HealthResponse {
     status: String,
     services: Vec<ServiceHealth>,
     mesh: MeshHealth,
+    resilience: ResilienceStatus,
 }
 
 pub fn router(state: HealthState) -> Router {
@@ -108,6 +119,12 @@ async fn healthz(State(state): State<HealthState>) -> impl IntoResponse {
 
     debug!(connected = ?connected, "estado atual da malha de serviços");
 
+    let open_circuits = state.resilience.open_circuits().await;
+    let dead_letters = state.resilience.dead_letter_count().await;
+    if !open_circuits.is_empty() {
+        overall_ok = false;
+    }
+
     let response = HealthResponse {
         status: if overall_ok {
             "ok".into()
@@ -118,6 +135,10 @@ async fn healthz(State(state): State<HealthState>) -> impl IntoResponse {
         mesh: MeshHealth {
             connected,
             expected: state.expected_mesh.clone(),
+        },
+        resilience: ResilienceStatus {
+            open_circuits,
+            dead_letters,
         },
     };
 

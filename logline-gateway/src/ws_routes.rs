@@ -4,9 +4,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::headers::authorization::Bearer;
+use axum::headers::Authorization;
+use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
+use axum::TypedHeader;
 use futures::{SinkExt, StreamExt};
 use logline_core::errors::LogLineError;
 use logline_core::websocket::{
@@ -18,6 +22,8 @@ use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
 use crate::discovery::ServiceDiscovery;
+use crate::resilience::ResilienceState;
+use crate::security::{AuthContext, SecurityState};
 
 #[derive(Clone, Default)]
 pub struct ClientRegistry {
@@ -96,6 +102,8 @@ pub struct WsState {
     pub clients: ClientRegistry,
     pub router: MessageRouter,
     pub mesh_handle: ServiceMeshClientHandle,
+    pub resilience: ResilienceState,
+    pub security: Arc<SecurityState>,
 }
 
 impl WsState {
@@ -103,11 +111,15 @@ impl WsState {
         mesh_handle: ServiceMeshClientHandle,
         clients: ClientRegistry,
         router: MessageRouter,
+        resilience: ResilienceState,
+        security: Arc<SecurityState>,
     ) -> Self {
         Self {
             clients,
             router,
             mesh_handle,
+            resilience,
+            security,
         }
     }
 }
@@ -118,18 +130,38 @@ pub fn router(state: WsState) -> Router {
         .with_state(state)
 }
 
-async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<WsState>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| async move {
-        if let Err(err) = handle_connection(socket, state).await {
-            error!(?err, "websocket client session terminated with error");
+async fn ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(state): State<WsState>,
+    auth: Option<TypedHeader<Authorization<Bearer>>>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let bearer = auth.ok_or(StatusCode::UNAUTHORIZED)?;
+    let token = bearer.token().to_string();
+    let context = state
+        .security
+        .validate_token(token.as_str())
+        .map_err(|err| {
+            state.security.audit_failure(&err, "/ws");
+            StatusCode::UNAUTHORIZED
+        })?;
+
+    info!(subject = %context.subject, "cliente WebSocket autenticado");
+
+    Ok(ws.on_upgrade(move |socket| async move {
+        if let Err(err) = handle_connection(socket, state.clone(), context.clone()).await {
+            error!(?err, "conexão WebSocket terminou com erro");
         }
-    })
+    }))
 }
 
-async fn handle_connection(socket: WebSocket, state: WsState) -> Result<(), LogLineError> {
+async fn handle_connection(
+    socket: WebSocket,
+    state: WsState,
+    context: AuthContext,
+) -> Result<(), LogLineError> {
     let (mut sender, mut receiver) = socket.split();
     let (client_id, mut outbound) = state.clients.register().await;
-    info!(%client_id, "cliente WebSocket conectado ao gateway");
+    info!(%client_id, subject = %context.subject, "cliente WebSocket conectado ao gateway");
 
     let mut mesh_handle = state.mesh_handle.clone();
     let clients = state.clients.clone();
@@ -147,10 +179,10 @@ async fn handle_connection(socket: WebSocket, state: WsState) -> Result<(), LogL
                 let message = incoming.map_err(|err| LogLineError::TransportError(err.to_string()))?;
                 match message {
                     Message::Text(text) => {
-                        handle_client_payload(&mut mesh_handle, &clients, &router, &client_id, Message::Text(text)).await?;
+                        handle_client_payload(&mut mesh_handle, &clients, &router, &state.resilience, &client_id, Message::Text(text)).await?;
                     }
                     Message::Binary(bytes) => {
-                        handle_client_payload(&mut mesh_handle, &clients, &router, &client_id, Message::Binary(bytes)).await?;
+                        handle_client_payload(&mut mesh_handle, &clients, &router, &state.resilience, &client_id, Message::Binary(bytes)).await?;
                     }
                     Message::Ping(payload) => {
                         sender.send(Message::Pong(payload)).await.map_err(|err| LogLineError::TransportError(err.to_string()))?;
@@ -167,7 +199,7 @@ async fn handle_connection(socket: WebSocket, state: WsState) -> Result<(), LogL
     }
 
     clients.unregister(&client_id).await;
-    info!(%client_id, "cliente WebSocket desconectado");
+    info!(%client_id, subject = %context.subject, "cliente WebSocket desconectado");
 
     Ok(())
 }
@@ -176,6 +208,7 @@ async fn handle_client_payload(
     mesh: &mut ServiceMeshClientHandle,
     clients: &ClientRegistry,
     router: &MessageRouter,
+    resilience: &ResilienceState,
     client_id: &Uuid,
     message: Message,
 ) -> Result<(), LogLineError> {
@@ -197,6 +230,9 @@ async fn handle_client_payload(
 
     for target in targets {
         if let Err(err) = mesh.send_to(target, service_message.clone()).await {
+            resilience
+                .record_failure(target, target, &err.to_string(), serialized.len(), true)
+                .await;
             warn!(%client_id, %target, ?err, "falha ao encaminhar mensagem do cliente para peer");
         }
     }
@@ -263,10 +299,14 @@ impl ServiceMessageHandler for GatewayMeshHandler {
     }
 }
 
-pub fn initialise_mesh(discovery: &ServiceDiscovery) -> (GatewayMesh, WsState) {
+pub fn initialise_mesh(
+    discovery: &ServiceDiscovery,
+    resilience: ResilienceState,
+    security: Arc<SecurityState>,
+) -> (GatewayMesh, WsState) {
     let clients = ClientRegistry::default();
     let router = MessageRouter::new();
     let mesh = GatewayMesh::new(discovery.peers(), clients.clone(), router.clone());
-    let state = WsState::new(mesh.handle(), clients, router);
+    let state = WsState::new(mesh.handle(), clients, router, resilience, security);
     (mesh, state)
 }

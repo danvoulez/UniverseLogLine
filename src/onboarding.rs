@@ -1,16 +1,25 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use chrono::{DateTime, Utc};
 use colored::*;
 use dirs::home_dir;
 use logline_core::identity::LogLineID;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncBufReadExt;
 use uuid::Uuid;
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OnboardingCliError {
@@ -44,6 +53,62 @@ impl From<io::Error> for OnboardingCliError {
 struct SessionData {
     sessions: HashMap<String, StoredSession>,
     active_handle: Option<String>,
+}
+
+const SESSION_FILE_VERSION: u8 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EncryptedSessionFile {
+    version: u8,
+    nonce: String,
+    ciphertext: String,
+}
+
+struct SessionCrypto {
+    key: Key,
+}
+
+impl SessionCrypto {
+    fn new() -> Result<Self, OnboardingCliError> {
+        let key_bytes = load_or_create_key()?;
+        let key = *Key::from_slice(&key_bytes);
+        Ok(Self { key })
+    }
+
+    fn encrypt(&self, payload: &[u8]) -> Result<EncryptedSessionFile, OnboardingCliError> {
+        let cipher = ChaCha20Poly1305::new(&self.key);
+        let mut nonce_bytes = [0u8; 12];
+        OsRng.fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = cipher
+            .encrypt(nonce, payload)
+            .map_err(|err| OnboardingCliError::Storage(err.to_string()))?;
+        Ok(EncryptedSessionFile {
+            version: SESSION_FILE_VERSION,
+            nonce: URL_SAFE_NO_PAD.encode(nonce_bytes),
+            ciphertext: URL_SAFE_NO_PAD.encode(ciphertext),
+        })
+    }
+
+    fn decrypt(&self, envelope: &EncryptedSessionFile) -> Result<Vec<u8>, OnboardingCliError> {
+        if envelope.version != SESSION_FILE_VERSION {
+            return Err(OnboardingCliError::Storage(format!(
+                "versão de sessão desconhecida: {}",
+                envelope.version
+            )));
+        }
+        let nonce_bytes = URL_SAFE_NO_PAD
+            .decode(envelope.nonce.as_bytes())
+            .map_err(|err| OnboardingCliError::Storage(err.to_string()))?;
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let ciphertext = URL_SAFE_NO_PAD
+            .decode(envelope.ciphertext.as_bytes())
+            .map_err(|err| OnboardingCliError::Storage(err.to_string()))?;
+        let cipher = ChaCha20Poly1305::new(&self.key);
+        cipher
+            .decrypt(nonce, ciphertext.as_ref())
+            .map_err(|err| OnboardingCliError::Storage(err.to_string()))
+    }
 }
 
 impl Default for SessionData {
@@ -83,30 +148,45 @@ impl StoredSession {
 pub struct SessionStore {
     path: PathBuf,
     data: SessionData,
+    crypto: SessionCrypto,
 }
 
 impl SessionStore {
     pub fn load() -> Result<Self, OnboardingCliError> {
         let path = session_file_path()?;
+        let crypto = SessionCrypto::new()?;
         let data = if path.exists() {
-            let contents = fs::read_to_string(&path)?;
-            serde_json::from_str(&contents).map_err(|err| {
-                OnboardingCliError::Storage(format!("arquivo de sessão inválido: {err}"))
-            })?
+            let contents = fs::read(&path)?;
+            if contents.is_empty() {
+                SessionData::default()
+            } else if let Ok(encrypted) = serde_json::from_slice::<EncryptedSessionFile>(&contents)
+            {
+                let decrypted = crypto.decrypt(&encrypted)?;
+                serde_json::from_slice(&decrypted).map_err(|err| {
+                    OnboardingCliError::Storage(format!("arquivo de sessão inválido: {err}"))
+                })?
+            } else {
+                serde_json::from_slice(&contents).map_err(|err| {
+                    OnboardingCliError::Storage(format!("arquivo de sessão inválido: {err}"))
+                })?
+            }
         } else {
             SessionData::default()
         };
 
-        Ok(Self { path, data })
+        Ok(Self { path, data, crypto })
     }
 
     pub fn save(&self) -> Result<(), OnboardingCliError> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let payload = serde_json::to_string_pretty(&self.data)
+        let payload = serde_json::to_vec(&self.data)
             .map_err(|err| OnboardingCliError::Storage(err.to_string()))?;
-        fs::write(&self.path, payload)?;
+        let envelope = self.crypto.encrypt(&payload)?;
+        let serialized = serde_json::to_string_pretty(&envelope)
+            .map_err(|err| OnboardingCliError::Storage(err.to_string()))?;
+        fs::write(&self.path, serialized)?;
         Ok(())
     }
 
@@ -152,13 +232,60 @@ impl SessionStore {
     }
 }
 
-fn session_file_path() -> Result<PathBuf, OnboardingCliError> {
+fn session_dir() -> Result<PathBuf, OnboardingCliError> {
     let mut path = home_dir().ok_or_else(|| {
         OnboardingCliError::Storage("não foi possível determinar diretório home".into())
     })?;
     path.push(".logline");
     path.push("sessions");
     fs::create_dir_all(&path)?;
+    Ok(path)
+}
+
+fn session_key_path() -> Result<PathBuf, OnboardingCliError> {
+    let mut path = session_dir()?;
+    path.push("session.key");
+    Ok(path)
+}
+
+fn load_or_create_key() -> Result<[u8; 32], OnboardingCliError> {
+    let path = session_key_path()?;
+    if path.exists() {
+        let raw = fs::read_to_string(&path)?;
+        let decoded = URL_SAFE_NO_PAD
+            .decode(raw.trim().as_bytes())
+            .map_err(|err| OnboardingCliError::Storage(err.to_string()))?;
+        if decoded.len() != 32 {
+            return Err(OnboardingCliError::Storage(
+                "chave de sessão com tamanho inválido".into(),
+            ));
+        }
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&decoded);
+        Ok(key)
+    } else {
+        let mut key = [0u8; 32];
+        OsRng.fill_bytes(&mut key);
+        let encoded = URL_SAFE_NO_PAD.encode(key);
+        fs::write(&path, encoded)?;
+        secure_key_permissions(&path)?;
+        Ok(key)
+    }
+}
+
+fn secure_key_permissions(path: &Path) -> Result<(), OnboardingCliError> {
+    #[cfg(unix)]
+    {
+        let metadata = fs::metadata(path)?;
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o600);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
+}
+
+fn session_file_path() -> Result<PathBuf, OnboardingCliError> {
+    let mut path = session_dir()?;
     path.push("onboarding.json");
     Ok(path)
 }
@@ -462,6 +589,41 @@ pub fn print_shell_execution(response: &ExecuteShellResponse, command: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn session_store_encrypts_payload() {
+        let dir = tempdir().expect("temp dir");
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", dir.path());
+
+        let mut store = SessionStore::load().expect("load session store");
+        let keypair = logline_core::identity::LogLineKeyPair::generate(
+            "tester",
+            Some("Tester".to_string()),
+            None,
+            false,
+        );
+        let signing_key = URL_SAFE_NO_PAD.encode(keypair.signing_key.to_bytes());
+        let session = StoredSession::new("tester", Uuid::new_v4(), keypair.id.clone(), signing_key);
+        store.upsert(session);
+        store.save().expect("persist");
+
+        let contents =
+            std::fs::read_to_string(session_file_path().expect("path")).expect("read session file");
+        assert!(contents.contains("ciphertext"));
+        assert!(!contents.contains("tester"));
+
+        let reloaded = SessionStore::load().expect("reload store");
+        let restored = reloaded.session("tester").expect("session exists");
+        assert_eq!(restored.handle, "tester");
+
+        if let Some(home) = original_home {
+            std::env::set_var("HOME", home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+    }
 
     #[test]
     fn slugify_matches_gateway() {
