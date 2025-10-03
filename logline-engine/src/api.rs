@@ -1,19 +1,23 @@
 use std::sync::Arc;
 
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
+use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
-use tracing::info;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::error::EngineError;
 use crate::runtime::{EngineHandle, ExecutionRuntime, TaskHandler};
 use crate::task::{ExecutionTask, TaskPriority, TaskRecord, TaskStatus};
+use crate::ws_client;
+use logline_core::websocket::{ServiceMessage, WebSocketEnvelope};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineServiceConfig {
@@ -21,6 +25,10 @@ pub struct EngineServiceConfig {
     pub bind_address: String,
     #[serde(default = "default_worker_count")]
     pub workers: usize,
+    #[serde(default)]
+    pub timeline_ws_url: Option<String>,
+    #[serde(default)]
+    pub rules_ws_url: Option<String>,
 }
 
 fn default_bind_address() -> String {
@@ -36,6 +44,8 @@ impl Default for EngineServiceConfig {
         Self {
             bind_address: default_bind_address(),
             workers: default_worker_count(),
+            timeline_ws_url: None,
+            rules_ws_url: None,
         }
     }
 }
@@ -68,13 +78,16 @@ where
                 get(list_tasks).post(schedule_task),
             )
             .route("/tenants/:tenant/tasks/:task_id", get(get_task))
+            .route("/ws/service", get(service_ws_upgrade))
             .with_state(state)
     }
 
     pub async fn serve(self, config: EngineServiceConfig) -> anyhow::Result<oneshot::Sender<()>> {
         let mut runtime = ExecutionRuntime::new();
         runtime.start(self.handler.clone(), config.workers);
-        let router = Self::build_router(runtime.handle());
+        let handle = runtime.handle();
+        let router = Self::build_router(handle.clone());
+        ws_client::start_service_mesh(handle.clone(), &config);
         let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
         let (tx, rx) = oneshot::channel();
 
@@ -95,6 +108,92 @@ where
 
 async fn health() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok" }))
+}
+
+async fn service_ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(_state): State<EngineApiState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| async move {
+        if let Err(err) = handle_service_socket(socket).await {
+            warn!(?err, "engine service websocket closed with error");
+        }
+    })
+}
+
+async fn handle_service_socket(socket: WebSocket) -> anyhow::Result<()> {
+    let (mut sender, mut receiver) = socket.split();
+    let hello = ServiceMessage::ServiceHello {
+        sender: "logline-engine".into(),
+        capabilities: vec!["task_scheduler".into(), "rule_dispatch".into()],
+    };
+    let hello_message = WebSocketEnvelope::from_service_message(&hello)
+        .and_then(|envelope| envelope.to_message())
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+    sender
+        .send(hello_message)
+        .await
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+    while let Some(message) = receiver.next().await {
+        match message {
+            Ok(Message::Text(text)) => {
+                handle_service_message(Message::Text(text), &mut sender).await?;
+            }
+            Ok(Message::Binary(bytes)) => {
+                handle_service_message(Message::Binary(bytes), &mut sender).await?;
+            }
+            Ok(Message::Ping(payload)) => {
+                sender
+                    .send(Message::Pong(payload))
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            }
+            Ok(Message::Pong(_)) => {}
+            Ok(Message::Close(_)) => break,
+            Err(err) => {
+                return Err(anyhow::anyhow!(err.to_string()));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_service_message(
+    message: Message,
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+) -> anyhow::Result<()> {
+    let envelope =
+        WebSocketEnvelope::from_message(message).map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    let payload = envelope
+        .into_service_message()
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+
+    match payload {
+        ServiceMessage::HealthCheckPing => {
+            let pong = ServiceMessage::HealthCheckPong;
+            let message = WebSocketEnvelope::from_service_message(&pong)
+                .and_then(|envelope| envelope.to_message())
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            sender
+                .send(message)
+                .await
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        }
+        ServiceMessage::ServiceHello {
+            sender: peer,
+            capabilities,
+        } => {
+            info!(%peer, ?capabilities, "service peer connected to engine");
+        }
+        other => {
+            debug!(message = ?other, "received service message on engine socket");
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]

@@ -5,6 +5,7 @@ pub mod error;
 pub mod runtime;
 pub mod scheduler;
 pub mod task;
+pub mod ws_client;
 
 pub use api::{EngineApiBuilder, EngineServiceConfig};
 pub use error::EngineError;
