@@ -1,182 +1,104 @@
 # 🚀 Railway Manual Setup Guide - LogLine Universe
 
-Since the API requires workspace context, here's the manual setup process:
+Deploy the LogLine microservices with a single Dockerfile and the minimum configuration required.
 
-## Step 1: Create Project on Railway Web Interface
+## Step 1: Create the Railway Project
 
 1. Go to [railway.app](https://railway.app)
-2. Login with your account
+2. Log in with your account
 3. Click **"New Project"**
-4. Name it: **`logline-universe`**
-5. Description: **"LogLine Universe - Distributed logging and identity system"**
+4. Name it **`logline-universe`** (or your preferred name)
+5. Optionally add the description **"LogLine Universe - Distributed logging and identity system"**
 
-## Step 2: Add Database Services
+## Step 2: Provision PostgreSQL
 
-### PostgreSQL Database
-1. In your project, click **"Add Service"**
-2. Select **"Database"** → **"PostgreSQL"**
+1. Inside the project, click **"Add Service"**
+2. Choose **"Database" → "PostgreSQL"**
 3. Railway will provision a PostgreSQL 15 instance
-4. Note the connection details
+4. Keep the generated connection string handy – it will be referenced as `${{Postgres.DATABASE_URL}}`
 
-### Redis Cache
-1. Click **"Add Service"** again  
-2. Select **"Database"** → **"Redis"**
-3. Railway will provision a Redis 7 instance
+## Step 3: Deploy the Microservices
 
-## Step 3: Deploy the 4 Microservices
+All services now share the same root `Dockerfile`. Create one Railway service per microservice and set the build arguments so the image knows which binary to compile.
 
-For each service, follow these steps:
+For each microservice:
 
-### 3.1 Deploy logline-id Service
-1. Click **"Add Service"** → **"GitHub Repo"**
-2. Select: **`danvoulez/UniverseLogLine`**
-3. **Service Name**: `logline-id`
-4. **Root Directory**: `.` (root)
-5. **Dockerfile**: `Dockerfile.id`
-6. **Port**: `8079`
+1. Click **"Add Service" → "GitHub Repo"** and select **`danvoulez/UniverseLogLine`**
+2. **Root Directory**: `.` (repository root)
+3. **Dockerfile**: `Dockerfile`
+4. Under **Settings → Build → Build Args**, configure the following values:
 
-### 3.2 Deploy logline-timeline Service  
-1. Click **"Add Service"** → **"GitHub Repo"**
-2. Select: **`danvoulez/UniverseLogLine`**
-3. **Service Name**: `logline-timeline`
-4. **Root Directory**: `.` (root)
-5. **Dockerfile**: `Dockerfile.timeline`
-6. **Port**: `8080`
+| Service            | `SERVICE`           | `SERVICE_PORT` | Notes |
+|--------------------|--------------------|----------------|-------|
+| `logline-id`       | `logline-id`       | `8079`         | Default health path `/health`
+| `logline-timeline` | `logline-timeline` | `8080`         | Requires Postgres URL (next step)
+| `logline-engine`   | `logline-engine`   | `8082`         | Set `ENGINE_RULES_PATH` env var if you ship rule files in the image/volume
 
-### 3.3 Deploy logline-rules Service
-1. Click **"Add Service"** → **"GitHub Repo"**
-2. Select: **`danvoulez/UniverseLogLine`**
-3. **Service Name**: `logline-rules`
-4. **Root Directory**: `.` (root)
-5. **Dockerfile**: `Dockerfile.rules`
-6. **Port**: `8081`
-
-### 3.4 Deploy logline-engine Service
-1. Click **"Add Service"** → **"GitHub Repo"**
-2. Select: **`danvoulez/UniverseLogLine`**
-3. **Service Name**: `logline-engine`
-4. **Root Directory**: `.` (root)
-5. **Dockerfile**: `Dockerfile.engine`
-6. **Port**: `8082`
+> ℹ️ Railway applies build args during image build. The default command matches `SERVICE`, so you only need to override `SERVICE_CMD` if you wrap the binary in a custom script.
 
 ## Step 4: Configure Environment Variables
 
-In your Railway project settings, add these shared variables:
+Only the timeline needs a database connection. Add the variable to the `logline-timeline` service (or the project-level environment if you prefer a single definition):
 
-```bash
-# Core Configuration
-LOGLINE_ENV=production
-LOGLINE_NODE_NAME=logline-production
-
-# Service Bindings
-LOGLINE_HTTP_BIND=0.0.0.0:8080
-LOGLINE_WS_BIND=0.0.0.0:8081
-
-# Database URLs (Railway auto-populates these)
-DATABASE_URL=${{Postgres.DATABASE_URL}}
-REDIS_URL=${{Redis.REDIS_URL}}
-```
-
-## Step 5: Service-Specific Environment Variables
-
-### For logline-timeline:
 ```bash
 TIMELINE_DATABASE_URL=${{Postgres.DATABASE_URL}}
-TIMELINE_HTTP_BIND=0.0.0.0:8080
 ```
 
-### For logline-rules:
-```bash
-RULES_DATABASE_URL=${{Postgres.DATABASE_URL}}
-RULES_HTTP_BIND=0.0.0.0:8081
-```
+Optional variables:
 
-### For logline-engine:
-```bash
-ENGINE_DATABASE_URL=${{Postgres.DATABASE_URL}}
-ENGINE_REDIS_URL=${{Redis.REDIS_URL}}
-ENGINE_HTTP_BIND=0.0.0.0:8082
-```
+- `ENGINE_RULES_PATH` (engine service) – absolute path to a YAML/JSON rule bundle included in the image or mounted volume.
+- `TIMELINE_HTTP_BIND`, `ENGINE_HTTP_BIND`, etc., if you need to override the default bind addresses from code (defaults are already `0.0.0.0`).
 
-### For logline-id:
-```bash
-ID_HTTP_BIND=0.0.0.0:8079
-```
+## Step 5: Run Database Migrations
 
-## Step 6: Run Database Migrations
+Once PostgreSQL is ready:
 
-Once PostgreSQL is running:
-
-1. Go to PostgreSQL service → **"Connect"** → **"Query"**
-2. Copy and paste the content from each migration file:
+1. Open the PostgreSQL service → **"Connect"** → **"Query"**
+2. Execute the migration files in order:
    - `migrations/001_create_timeline_spans.sql`
    - `migrations/002_implement_multi_tenant_infrastructure.sql`
    - `migrations/003_multi_tenant_timeline_integration.sql`
-3. Execute them in order
 
-## Step 7: Verify Deployment
+## Step 6: Verify Deployment
 
-### Check Service Status
-All services should show **"Active"** status in Railway dashboard.
+- Each service should report **"Active"** in the Railway dashboard.
+- Health endpoints (replace with your generated Railway URLs):
 
-### Test Endpoints
-Once deployed, you'll get URLs like:
-- **ID Service**: `https://logline-id-production.up.railway.app`
-- **Timeline**: `https://logline-timeline-production.up.railway.app`
-- **Rules**: `https://logline-rules-production.up.railway.app`
-- **Engine**: `https://logline-engine-production.up.railway.app`
-
-### Health Checks
-Test each service:
 ```bash
-curl https://your-service-url/health
+curl https://logline-id-production.up.railway.app/health
+curl https://logline-timeline-production.up.railway.app/health
+curl https://logline-engine-production.up.railway.app/health
 ```
 
 ## 🎯 Expected Result
 
-After setup, you'll have:
-- ✅ **6 services running**: PostgreSQL, Redis, ID, Timeline, Rules, Engine
-- ✅ **Complete database schema** with multi-tenancy
-- ✅ **All 4 microservices** deployed and communicating
-- ✅ **Production-ready infrastructure** on Railway
+After completing the steps you will have:
+
+- ✅ PostgreSQL + three LogLine microservices running from the same Dockerfile
+- ✅ Timeline ledger isolated from rule execution
+- ✅ Engine service loading and applying rules locally when `ENGINE_RULES_PATH` is provided
 
 ## 📊 Service Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐
-│   PostgreSQL    │    │      Redis      │
-│   (Database)    │    │    (Cache)      │
-└─────────┬───────┘    └─────────┬───────┘
-          │                      │
-          └──────────┬───────────┘
-                     │
-    ┌────────────────┼────────────────┐
-    │                │                │
-┌───▼───┐    ┌───▼───┐    ┌───▼───┐    ┌───▼───┐
-│  ID   │    │Timeline│    │ Rules │    │Engine │
-│ :8079 │    │ :8080  │    │ :8081 │    │ :8082 │
-└───────┘    └───────┘    └───────┘    └───────┘
+┌─────────────────┐
+│   PostgreSQL    │
+│   (Database)    │
+└───────┬────────┘
+        │
+ ┌──────▼──────┐   ┌────────────────┐   ┌────────────────┐
+ │ logline-id  │   │ logline-timeline│   │ logline-engine │
+ │    :8079    │   │      :8080      │   │      :8082      │
+ └─────────────┘   └────────────────┘   └────────────────┘
 ```
 
 ## 🆘 Troubleshooting
 
-### Build Failures
-- Check Dockerfile syntax
-- Verify all dependencies in Cargo.toml
-- Check Railway build logs
-
-### Connection Issues
-- Verify DATABASE_URL is set correctly
-- Check service-to-service networking
-- Verify environment variables
-
-### Migration Issues
-- Run migrations in correct order
-- Check PostgreSQL version (needs 12+)
-- Verify database permissions
+- **Build failures**: confirm the correct `SERVICE` build arg, inspect Railway build logs for Cargo errors.
+- **Connection issues**: ensure `TIMELINE_DATABASE_URL` is present and migrations ran successfully.
+- **Rule evaluation**: verify the engine has access to the rule files referenced by `ENGINE_RULES_PATH`.
 
 ---
 
-**Total Deployment Time**: ~10-15 minutes
-**Services**: 6 (2 databases + 4 microservices)
-**Ports**: 8079 (ID), 8080 (Timeline), 8081 (Rules), 8082 (Engine)
+**Estimated setup time**: ~10 minutes (Postgres + 3 services)
+

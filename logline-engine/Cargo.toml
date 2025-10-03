@@ -20,4 +20,6 @@ tokio = { version = "1.34", features = ["rt", "macros", "sync", "time"] }
 tracing = "0.1"
 uuid = { version = "1.6", features = ["serde", "v4"] }
 logline-core = { path = "../logline-core" }
+logline-protocol = { path = "../logline-protocol" }
+logline-rules = { path = "../logline-rules" }
 url = "2.4"
