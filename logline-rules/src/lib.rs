@@ -12,6 +12,8 @@ mod error;
 mod loader;
 mod outcome;
 mod rule;
+mod service;
+mod store;
 
 pub use action::RuleAction;
 pub use condition::{FieldPath, RuleCondition};
@@ -19,6 +21,8 @@ pub use engine::RuleEngine;
 pub use error::RuleError;
 pub use outcome::{Decision, EnforcementOutcome};
 pub use rule::Rule;
+pub use service::{RuleApiBuilder, RuleServiceConfig};
+pub use store::{RuleHistoryEntry, RuleStore};
 
 #[cfg(test)]
 mod tests {
