@@ -52,18 +52,7 @@ except:
 echo -e "${BLUE}📋 Step 1: Creating Railway project...${NC}"
 
 # Create project
-PROJECT_QUERY='
-mutation {
-  projectCreate(input: {
-    name: "'$PROJECT_NAME'"
-    description: "LogLine Universe - Distributed logging and identity system"
-    isPublic: false
-  }) {
-    id
-    name
-  }
-}
-'
+PROJECT_QUERY="mutation { projectCreate(input: { name: \"$PROJECT_NAME\", description: \"LogLine Universe - Distributed logging and identity system\", isPublic: false }) { id name } }"
 
 PROJECT_RESPONSE=$(railway_graphql "$PROJECT_QUERY")
 PROJECT_ID=$(extract_value "$PROJECT_RESPONSE" "data.projectCreate.id")

@@ -1,5 +1,0 @@
-(docstring observer.firehose "Entrada genérica para produtores.")
-(contract observer.firehose.lll
-  import engine.observer.aggregator.lll as agg
-  entry ingest(event:map) { CALL agg.append(event) }
-)

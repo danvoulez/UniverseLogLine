@@ -1,7 +1,0 @@
-(docstring observer.query "Consultas: last(n), count.")
-(contract observer.query.lll
-  import engine.observer.aggregator.lll as agg
-  import sys.fs as f
-  view last(n:u32)->list<map> { return agg.latest(n) }
-  view count->u64 { p="data/observer/events.ndjson"; if !f.exists(p) { return 0 } return to_u64(len(split(f.read(p),"\n"))-1) }
-)
