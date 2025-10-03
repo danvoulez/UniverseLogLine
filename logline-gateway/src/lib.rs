@@ -1,6 +1,7 @@
 pub mod config;
 pub mod discovery;
 pub mod health;
+pub mod onboarding;
 pub mod rest_routes;
 pub mod routing;
 pub mod ws_routes;

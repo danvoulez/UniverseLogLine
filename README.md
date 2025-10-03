@@ -159,6 +159,26 @@ You can bootstrap the entire LogLine platform on your local machine using Docker
 *   [Docker](https://www.docker.com/get-started/) and Docker Compose
 *   A `git` client
 
+### First contact: computable onboarding
+
+The `logline` CLI now automates the full onboarding ritual that wires a new
+person, tenant and initial application into the universe. With the gateway
+running you can execute the canonical flow:
+
+```bash
+logline create identity --name "Daniel Amarilho" --handle dcamarilho
+logline create tenant --name "VoulezVous"
+logline assign identity dcamarilho --to tenant voulezvous
+logline init app --template minicontratos --owner dcamarilho
+logline declare purpose --app minicontratos \
+  --description "Registrar ações computáveis da empresa VoulezVous"
+logline run shell -c "quero registrar um pagamento de €50 para Rafa, feito ontem"
+```
+
+Each command calls the new onboarding REST endpoints exposed by
+`logline-gateway`, creates timeline spans, issues a JWT bound to the freshly
+minted LogLine ID and persists the session locally (in `~/.logline/sessions`).
+
 ### Step 1: Clone the Repository
 ```bash
 git clone https://github.com/logline/logline.git
