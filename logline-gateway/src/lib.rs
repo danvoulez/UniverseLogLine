@@ -2,13 +2,15 @@ pub mod config;
 pub mod discovery;
 pub mod health;
 pub mod onboarding;
+pub mod resilience;
 pub mod rest_routes;
 pub mod routing;
+pub mod security;
 pub mod ws_routes;
 
 use std::net::SocketAddr;
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tracing::info;
@@ -30,8 +32,12 @@ impl GatewayHandle {
 }
 
 pub async fn start_gateway(config: GatewayConfig) -> anyhow::Result<GatewayHandle> {
+    if config.tls().is_some() {
+        bail!("test gateway harness does not support TLS");
+    }
+
     let discovery = ServiceDiscovery::from_config(&config);
-    let app = build_app(discovery);
+    let app = build_app(discovery, &config);
     app.mesh.spawn();
 
     let addr: SocketAddr = config
