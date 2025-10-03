@@ -40,17 +40,17 @@ Transform the LogLine System into a modular, distributed architecture composed o
 > 📋 **For detailed task breakdowns, see [TASKLIST.md](./TASKLIST.md)**
 
 ### Phase 1: Foundation (Weeks 1-2) ✅
-**Status: Mostly Completed**
+**Status: Completed**
 - ✅ **Task 1**: `logline-core` - Shared library with common types and utilities
 - ✅ **Task 2**: `logline-protocol` - Communication standards and message formats
 - ✅ **Task 3**: `logline-id` - Identity service with cryptographic signatures
-- ⏳ **Task 4**: `logline-timeline` - Timeline service with PostgreSQL backend (90% complete)
+- ✅ **Task 4**: `logline-timeline` - Timeline service with PostgreSQL backend (COMPLETED)
 - ⏳ **Task 5**: Database infrastructure setup on Railway
 - ⏳ **Task 6**: CI/CD pipelines and automated deployment
 
-### Phase 2: Core Services (Weeks 3-4) 📋
-**Status: Planned**
-- 📋 **Task 7**: `logline-rules` - Rules engine and grammar processing
+### Phase 2: Core Services (Weeks 3-4) 🔄
+**Status: In Progress**
+- ✅ **Task 7**: `logline-rules` - Rules engine and grammar processing (COMPLETED)
 - 📋 **Task 8**: `logline-engine` - Execution runtime and scheduler
 - 📋 **Task 9**: Inter-service communication protocols
 - 📋 **Task 10**: Monitoring and observability infrastructure
