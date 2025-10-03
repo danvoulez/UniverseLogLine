@@ -1,6 +1,7 @@
 mod config;
 mod discovery;
 mod health;
+mod onboarding;
 mod rest_routes;
 mod routing;
 mod ws_routes;
