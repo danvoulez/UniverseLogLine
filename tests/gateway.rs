@@ -4,6 +4,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use axum::routing::get;
 use axum::{Json, Router};
+use jsonwebtoken::{encode, EncodingKey, Header};
 use futures::{SinkExt, StreamExt};
 use logline_core::websocket::{ServiceMessage, WebSocketEnvelope};
 use logline_gateway::config::{GatewayConfig, ResilienceConfig, SecurityConfig, ServiceUrls};
@@ -13,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
+use serde::Serialize;
 
 struct HttpService {
     addr: SocketAddr,
@@ -33,6 +35,41 @@ async fn spawn_http_service(router: Router) -> anyhow::Result<HttpService> {
     });
 
     Ok(HttpService { addr, shutdown: tx })
+}
+
+#[derive(Serialize)]
+struct TestClaims {
+    sub: String,
+    iss: String,
+    aud: String,
+    exp: i64,
+    iat: i64,
+    scope: Option<String>,
+    tenant: Option<String>,
+}
+
+fn make_test_token() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    let claims = TestClaims {
+        sub: "user-123".into(),
+        iss: "tests".into(),
+        aud: "tests".into(),
+        exp: now + 3600,
+        iat: now,
+        scope: Some("user".into()),
+        tenant: None,
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(b"test-secret"),
+    )
+    .expect("failed to encode test token")
 }
 
 struct MeshPeer {
@@ -298,8 +335,10 @@ async fn rest_proxy_forwards_engine_ping() -> anyhow::Result<()> {
     let gateway = start_gateway(config).await?;
 
     let client = reqwest::Client::new();
+    let token = make_test_token();
     let response = client
         .get(format!("http://{}/engine/ping", gateway.addr))
+        .bearer_auth(token)
         .send()
         .await?
         .text()

@@ -71,6 +71,7 @@ wiremock = "0.5"
 criterion = { version = "0.5", features = ["async_tokio"] }
 tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots", "connect"] }
 logline-gateway = { path = "logline-gateway" }
+jsonwebtoken = "9"
 
 # CLI moved to dedicated logline-cli crate
 # [[bin]]
