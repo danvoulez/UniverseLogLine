@@ -2,6 +2,7 @@ mod config;
 mod discovery;
 mod health;
 mod onboarding;
+mod rate_limit;
 mod resilience;
 mod rest_routes;
 mod routing;
@@ -14,6 +15,7 @@ use anyhow::Context;
 use tracing::{error, info};
 
 use crate::config::GatewayConfig;
+use tower::make::Shared;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,14 +27,15 @@ async fn main() -> anyhow::Result<()> {
 
     let config = GatewayConfig::from_env().context("failed to load gateway configuration")?;
     let app = routing::GatewayApp::new(&config);
-    app.mesh.spawn();
+    let mesh = app.mesh;
+    mesh.spawn();
+
+    let mut router = Some(app.router);
 
     let addr: SocketAddr = config
         .bind_address()
         .parse()
         .context("invalid bind address")?;
-
-    let shutdown = shutdown_signal();
 
     if let Some(tls) = config.tls() {
         let tls_config = tls
@@ -40,9 +43,24 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("failed to load TLS certificates")?;
         info!(%addr, "starting logline-gateway with TLS");
+        let handle = axum_server::Handle::new();
+        let shutdown = shutdown_signal();
+        tokio::spawn({
+            let handle = handle.clone();
+            async move {
+                shutdown.await;
+                handle.graceful_shutdown(None);
+            }
+        });
+        let router = router
+            .take()
+            .expect("router should be available before TLS server start");
+
+        let service = Shared::new(router.into_service());
+
         axum_server::bind_rustls(addr, tls_config)
-            .serve(app.router.into_make_service())
-            .with_graceful_shutdown(shutdown)
+            .handle(handle)
+            .serve(service)
             .await
             .context("gateway server terminated with TLS error")?;
     } else {
@@ -54,8 +72,12 @@ async fn main() -> anyhow::Result<()> {
             .context("failed to read socket address")?;
         info!(%actual_addr, "starting logline-gateway");
 
-        if let Err(err) = axum::serve(listener, app.router.into_make_service())
-            .with_graceful_shutdown(shutdown)
+        let router = router
+            .take()
+            .expect("router should be available before TCP server start");
+
+        if let Err(err) = axum::serve(listener, router.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
             .await
         {
             error!(?err, "gateway server terminated with error");

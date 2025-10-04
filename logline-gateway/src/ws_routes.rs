@@ -4,13 +4,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
-use axum::headers::authorization::Bearer;
-use axum::headers::Authorization;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
-use axum::TypedHeader;
+use axum_extra::headers::authorization::Bearer;
+use axum_extra::headers::Authorization;
+use axum_extra::TypedHeader;
 use futures::{SinkExt, StreamExt};
 use logline_core::errors::LogLineError;
 use logline_core::websocket::{
