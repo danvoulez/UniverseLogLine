@@ -1,0 +1,12 @@
+FORCE REBUILD - Railway Cache Bust
+Timestamp: 2025-10-04T08:22:30Z
+
+Railway is still using cached Rust 1.75 builds.
+This file forces a complete rebuild with Rust 1.83.
+
+Changes made:
+- Updated Dockerfile to Rust 1.83
+- Added .dockerignore
+- Created this cache-busting file
+
+Railway MUST detect this and rebuild from scratch!
