@@ -57,10 +57,17 @@ impl SecurityState {
     }
 
     pub fn cors_layer(&self) -> CorsLayer {
+        let allow_any = self
+            .config
+            .cors_allowed_origins
+            .iter()
+            .any(|origin| origin.trim() == "*");
+
         let origins: Vec<_> = self
             .config
             .cors_allowed_origins
             .iter()
+            .filter(|origin| origin.trim() != "*")
             .filter_map(|origin| match origin.parse::<HeaderValue>() {
                 Ok(value) => Some(value),
                 Err(err) => {
@@ -70,7 +77,7 @@ impl SecurityState {
             })
             .collect();
 
-        let allow_origin = if origins.is_empty() {
+        let allow_origin = if allow_any || origins.is_empty() {
             AllowOrigin::any()
         } else {
             AllowOrigin::list(origins)
