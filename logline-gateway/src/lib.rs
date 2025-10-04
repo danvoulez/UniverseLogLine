@@ -2,6 +2,7 @@ pub mod config;
 pub mod discovery;
 pub mod health;
 pub mod onboarding;
+pub mod rate_limit;
 pub mod resilience;
 pub mod rest_routes;
 pub mod routing;

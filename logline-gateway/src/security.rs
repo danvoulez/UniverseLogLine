@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::{self, header, HeaderMap, HeaderValue, Method, StatusCode};
+use axum::body::Body;
+use axum::http::{self, header, HeaderMap, HeaderValue, Method, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use base64::Engine;
@@ -176,10 +177,10 @@ impl SecurityState {
     }
 }
 
-pub async fn enforce_auth<B>(
+pub async fn enforce_auth(
     State(state): State<Arc<SecurityState>>,
-    mut request: axum::http::Request<B>,
-    next: Next<B>,
+    mut request: Request<Body>,
+    next: Next,
 ) -> Result<Response, StatusCode> {
     let path = request.uri().path().to_string();
     let method = request.method().clone();

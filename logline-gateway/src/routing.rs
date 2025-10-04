@@ -1,9 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::error_handling::HandleErrorLayer;
+use axum::http::StatusCode;
 use axum::middleware;
+use axum::BoxError;
 use axum::Router;
-use tower::limit::{ConcurrencyLimitLayer, RateLimitLayer};
+use tower::limit::ConcurrencyLimitLayer;
 use tower::timeout::TimeoutLayer;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
@@ -12,6 +15,7 @@ use crate::config::GatewayConfig;
 use crate::discovery::ServiceDiscovery;
 use crate::health::{router as health_router, HealthState};
 use crate::onboarding::{router as onboarding_router, OnboardingState};
+use crate::rate_limit::{enforce_rate_limit, RateLimitState};
 use crate::resilience::{router as resilience_router, ResilienceState};
 use crate::rest_routes::{router as rest_router, RestProxyState};
 use crate::security::{enforce_auth, SecurityState};
@@ -62,18 +66,22 @@ pub fn build_app(discovery: ServiceDiscovery, config: &GatewayConfig) -> Gateway
 
     let cors_layer = security_state.cors_layer();
 
-    let rate_layer = RateLimitLayer::new(
+    let rate_limit_state = Arc::new(RateLimitState::new(
         security_state.rate_limit_per_minute(),
         Duration::from_secs(60),
-    );
+    ));
     let concurrency_layer = ConcurrencyLimitLayer::new(security_state.max_concurrent_requests());
     let timeout_layer = TimeoutLayer::new(timeout_duration);
-
+    let error_layer = HandleErrorLayer::new(|error: BoxError| async move {
+        if error.is::<tower::timeout::error::Elapsed>() {
+            StatusCode::REQUEST_TIMEOUT
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    });
     let service_layers = ServiceBuilder::new()
-        .layer(timeout_layer)
-        .layer(rate_layer)
-        .layer(concurrency_layer)
-        .layer(TraceLayer::new_for_http());
+        .layer(error_layer)
+        .layer(timeout_layer);
 
     let router = Router::new()
         .merge(rest_router)
@@ -82,7 +90,13 @@ pub fn build_app(discovery: ServiceDiscovery, config: &GatewayConfig) -> Gateway
         .merge(health_router)
         .merge(resilience_router)
         .layer(cors_layer)
+        .layer(TraceLayer::new_for_http())
+        .layer(concurrency_layer)
         .layer(service_layers)
+        .layer(middleware::from_fn_with_state(
+            rate_limit_state,
+            enforce_rate_limit,
+        ))
         .layer(middleware::from_fn_with_state(security_state, enforce_auth));
 
     GatewayApp { router, mesh }
