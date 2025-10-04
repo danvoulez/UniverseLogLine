@@ -3,16 +3,22 @@
 ########################################
 # Build stage
 ########################################
-FROM rustlang/rust:nightly-slim AS builder
+FROM ubuntu:22.04 AS builder
+
+# Install Rust manually to ensure latest version
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install latest Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 ARG SERVICE=logline-id
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        pkg-config \
-        libssl-dev \
-        libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
