@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.6
 
 ########################################
-# Build stage
+# Build ALL services stage
 ########################################
 FROM ubuntu:22.04 AS builder
 
@@ -18,13 +18,23 @@ RUN apt-get update && apt-get install -y \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-ARG SERVICE=logline-id
-
 WORKDIR /app
-
 COPY . .
 
-RUN cargo build --release --bin ${SERVICE}
+# Build ALL LogLine services at once
+RUN cargo build --release --bin logline-gateway && \
+    cargo build --release --bin logline-id && \
+    cargo build --release --bin logline-timeline && \
+    cargo build --release --bin logline-rules && \
+    cargo build --release --bin logline-engine && \
+    cargo build --release --bin logline-federation
+
+########################################
+# Service selection stage
+########################################
+FROM builder AS service-selector
+ARG SERVICE=logline-id
+RUN cp /app/target/release/${SERVICE} /app/service-binary
 
 ########################################
 # Runtime stage
@@ -46,8 +56,9 @@ RUN apt-get update \
 
 RUN useradd -r -s /bin/false logline
 
-COPY --from=builder /app/target/release/${SERVICE} /usr/local/bin/${SERVICE}
-RUN chown logline:logline /usr/local/bin/${SERVICE}
+COPY --from=service-selector /app/service-binary /usr/local/bin/service
+RUN chown logline:logline /usr/local/bin/service && \
+    chmod +x /usr/local/bin/service
 
 USER logline
 
@@ -56,4 +67,4 @@ EXPOSE ${SERVICE_PORT}
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -fsS http://localhost:${SERVICE_PORT}${HEALTH_PATH} || exit 1
 
-CMD ["${SERVICE_CMD}"]
+CMD ["/usr/local/bin/service"]
